@@ -1,0 +1,10 @@
+apiVersion: v2
+name: arcadedb
+description: |
+  A Helm chart for ArcadeDB
+
+type: application
+
+version: 26.5.1
+
+appVersion: "26.5.1"
