@@ -7,7 +7,7 @@ The official Helm chart for [ArcadeDB](https://arcadedb.com/), a multi-model dat
 ## Install
 
 ```bash
-helm repo add arcadedb https://arcadedata.github.io/arcadedb-helm/
+helm repo add arcadedb https://helm.arcadedb.com/
 helm repo update
 helm install my-arcadedb arcadedb/arcadedb
 ```
