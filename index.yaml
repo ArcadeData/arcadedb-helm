@@ -1,0 +1,14 @@
+apiVersion: v1
+entries:
+  arcadedb:
+  - apiVersion: v2
+    appVersion: 26.5.1
+    created: "2026-04-30T09:03:56.012344204Z"
+    description: 'A Helm chart for ArcadeDB '
+    digest: 3c727c6166c360f730099a8eeffd1bd41088ea6d2c668ae8609af0f19b4cdbcc
+    name: arcadedb
+    type: application
+    urls:
+    - https://github.com/ArcadeData/arcadedb-helm/releases/download/arcadedb-26.5.1/arcadedb-26.5.1.tgz
+    version: 26.5.1
+generated: "2026-04-30T09:03:56.012353752Z"
