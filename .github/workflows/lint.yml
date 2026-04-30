@@ -6,9 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,14 +35,16 @@ jobs:
           helm template test charts/arcadedb/ \
             --set autoscaling.enabled=true \
             --set autoscaling.minReplicas=3 \
-            --set autoscaling.maxReplicas=5 > /dev/null
+            --set autoscaling.maxReplicas=5 | grep -q "kind: HorizontalPodAutoscaler"
 
       - name: Template - HPA quorum guard fires
         run: |
-          helm template test charts/arcadedb/ \
+          output=$(helm template test charts/arcadedb/ \
             --set autoscaling.enabled=true \
             --set autoscaling.minReplicas=1 \
-            --set autoscaling.maxReplicas=5 2>&1 | grep -i "quorum"
+            --set autoscaling.maxReplicas=5 2>&1) \
+            && { echo "Expected helm template to fail but it succeeded"; exit 1; } \
+            || echo "$output" | grep -qi "quorum"
 
       - name: Template - ingress enabled
         run: |
