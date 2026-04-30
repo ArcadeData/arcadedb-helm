@@ -8,3 +8,5 @@ type: application
 version: 26.5.1
 
 appVersion: "26.5.1"
+annotations:
+  artifacthub.io/repositoryID: "fb85acb7-fb5b-4572-b44b-374a2b52658d"
