@@ -57,7 +57,7 @@ PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
   -o jsonpath='{.data.rootPassword}' | base64 -d)
 ```
 
-Poll `/api/v1/server` on each pod via `kubectl exec` until all 3 report the same non-empty leader. Retry every 5s, timeout 60s. Fail loudly if quorum is not reached.
+Open a temporary `kubectl port-forward` to each pod in turn and hit `/api/v1/server` with `curl`. Poll until all 3 report the same non-empty leader. Retry every 5s, timeout 60s. Fail loudly if quorum is not reached. (The ArcadeDB container is JRE-based and does not include `curl`, so all HTTP calls go through `port-forward` from the runner.)
 
 ### Phase 3 — Write
 
