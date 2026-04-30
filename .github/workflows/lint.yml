@@ -65,12 +65,12 @@ jobs:
 
       - name: Install kind
         run: |
-          curl -sLo /tmp/kind \
+          curl -sLo /tmp/kind-linux-amd64 \
             https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
           curl -sLo /tmp/kind.sha256 \
             https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64.sha256sum
-          echo "$(awk '{print $1}' /tmp/kind.sha256)  /tmp/kind" | sha256sum -c -
-          install -m 0755 /tmp/kind /usr/local/bin/kind
+          (cd /tmp && sha256sum -c kind.sha256)
+          install -m 0755 /tmp/kind-linux-amd64 /usr/local/bin/kind
 
       - name: Install kubectl
         run: |
