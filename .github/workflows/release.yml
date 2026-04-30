@@ -7,7 +7,7 @@ on:
         description: "Chart version (e.g. 26.5.2)"
         required: true
       app_version:
-        description: "ArcadeDB server version (e.g. 26.5.1) — leave blank to keep current appVersion"
+        description: "ArcadeDB server version (e.g. 26.5.1) - leave blank to keep current appVersion"
         required: false
 
 permissions:
@@ -23,9 +23,11 @@ jobs:
           fetch-depth: 0
 
       - name: Validate version format
+        env:
+          VERSION: ${{ github.event.inputs.version }}
         run: |
-          if ! echo "${{ github.event.inputs.version }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Error: '${{ github.event.inputs.version }}' is not valid semver (X.Y.Z)"
+          if ! echo "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: '${VERSION}' is not valid semver (X.Y.Z)"
             exit 1
           fi
 
@@ -35,9 +37,10 @@ jobs:
           version: v3.14.0
 
       - name: Update Chart.yaml
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+          APP_VERSION: ${{ github.event.inputs.app_version }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          APP_VERSION="${{ github.event.inputs.app_version }}"
           sed -i "s/^version:.*/version: ${VERSION}/" charts/arcadedb/Chart.yaml
           if [ -n "${APP_VERSION}" ]; then
             sed -i "s/^appVersion:.*/appVersion: \"${APP_VERSION}\"/" charts/arcadedb/Chart.yaml
@@ -49,13 +52,15 @@ jobs:
         run: helm lint charts/arcadedb/
 
       - name: Commit and tag
+        env:
+          VERSION: ${{ github.event.inputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add charts/arcadedb/Chart.yaml
-          git commit -m "chore(helm): release v${{ github.event.inputs.version }}"
-          git tag "v${{ github.event.inputs.version }}"
-          git push origin main --follow-tags
+          git commit -m "chore(helm): release v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin HEAD --follow-tags
 
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.6.0
