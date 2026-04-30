@@ -42,7 +42,7 @@ api() {               # api <local-port> <method> <path> [body]
 }
 
 cleanup() {
-  [[ -n "${PF_PID:-}" ]] && kill "$PF_PID" 2>/dev/null || true
+  [[ -n "${PF_PID:-}" ]] && { kill "$PF_PID" 2>/dev/null || true; }
 }
 trap cleanup EXIT
 
