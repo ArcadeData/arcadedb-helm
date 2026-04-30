@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Chart version (e.g. 26.5.2)"
+        required: true
+      app_version:
+        description: "ArcadeDB server version (e.g. 26.5.1) — leave blank to keep current appVersion"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          if ! echo "${{ github.event.inputs.version }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: '${{ github.event.inputs.version }}' is not valid semver (X.Y.Z)"
+            exit 1
+          fi
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Update Chart.yaml
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          APP_VERSION="${{ github.event.inputs.app_version }}"
+          sed -i "s/^version:.*/version: ${VERSION}/" charts/arcadedb/Chart.yaml
+          if [ -n "${APP_VERSION}" ]; then
+            sed -i "s/^appVersion:.*/appVersion: \"${APP_VERSION}\"/" charts/arcadedb/Chart.yaml
+          fi
+          echo "--- Chart.yaml after update ---"
+          cat charts/arcadedb/Chart.yaml
+
+      - name: Lint
+        run: helm lint charts/arcadedb/
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/arcadedb/Chart.yaml
+          git commit -m "chore(helm): release v${{ github.event.inputs.version }}"
+          git tag "v${{ github.event.inputs.version }}"
+          git push origin main --follow-tags
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.6.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          charts_dir: charts
+          skip_existing: true
