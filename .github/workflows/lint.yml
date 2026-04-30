@@ -58,21 +58,28 @@ jobs:
 
   integration:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install kind
         run: |
-          curl -sLo /usr/local/bin/kind \
+          curl -sLo /tmp/kind \
             https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
-          chmod +x /usr/local/bin/kind
+          curl -sLo /tmp/kind.sha256 \
+            https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64.sha256sum
+          echo "$(awk '{print $1}' /tmp/kind.sha256)  /tmp/kind" | sha256sum -c -
+          install -m 0755 /tmp/kind /usr/local/bin/kind
 
       - name: Install kubectl
         run: |
-          curl -sLo /usr/local/bin/kubectl \
+          curl -sLo /tmp/kubectl \
             "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
-          chmod +x /usr/local/bin/kubectl
+          curl -sLo /tmp/kubectl.sha256 \
+            "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl.sha256"
+          echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c -
+          install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
 
       - name: Set up Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
