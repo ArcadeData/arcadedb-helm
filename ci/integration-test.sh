@@ -18,6 +18,16 @@ pf_start() {          # pf_start <pod-ordinal> <local-port>
 
 pf_stop() { kill "$1" 2>/dev/null || true; }
 
+pf_wait() {   # pf_wait <local-port> [max-attempts]
+  local port=$1 attempts=${2:-10} i
+  for (( i=0; i<attempts; i++ )); do
+    curl -sf --max-time 1 "http://localhost:${port}/api/v1/ready" \
+      --user "root:${PASSWORD}" >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
 api() {               # api <local-port> <method> <path> [body]
   local port=$1 method=$2 path=$3 body=${4:-}
   if [[ -n "$body" ]]; then
@@ -31,11 +41,18 @@ api() {               # api <local-port> <method> <path> [body]
   fi
 }
 
+cleanup() {
+  [[ -n "${PF_PID:-}" ]] && kill "$PF_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+
 # ── retrieve password ─────────────────────────────────────────────────────────
 
 PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
   -n "$NAMESPACE" \
   -o jsonpath='{.data.rootPassword}' | base64 -d)
+
+[[ -n "$PASSWORD" ]] || { echo "ERROR: rootPassword secret is empty or missing"; exit 1; }
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
@@ -54,7 +71,7 @@ while true; do
   for i in 0 1 2; do
     LOCAL=$(( HTTP_PORT + 10 + i ))   # 2490, 2491, 2492
     PID=$(pf_start "$i" "$LOCAL")
-    sleep 1
+    pf_wait "$LOCAL" || { pf_stop "$PID"; continue; }
     LEADER=$(api "$LOCAL" GET /api/v1/server \
       | jq -r '.ha.leader // empty' 2>/dev/null || echo "")
     pf_stop "$PID"
@@ -82,7 +99,7 @@ done
 
 echo "==> [3/4] Writing test data via pod-0..."
 PF_PID=$(pf_start 0 "$HTTP_PORT")
-sleep 1
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to pod-0 failed"; exit 1; }
 
 api "$HTTP_PORT" POST /api/v1/create/integration-test >/dev/null
 
@@ -101,7 +118,10 @@ echo "    Write complete."
 echo "==> [4/4] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
-  | jq -r '.result[0].name // empty')
+  | jq -r '.result[0].name // empty') || {
+  echo "ERROR: read query failed"
+  exit 1
+}
 
 pf_stop "$PF_PID"
 
