@@ -60,7 +60,7 @@ Before starting, read these to ground yourself in current state:
 
 - [ ] **Step 1: Create the Makefile**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/Makefile`:
+Create `Makefile`:
 
 ```makefile
 HELM ?= helm
@@ -123,7 +123,7 @@ git commit -m "build: add Makefile with lint, test-unit, test-integration target
 
 - [ ] **Step 1: Create the `.helmignore`**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/.helmignore`:
+Create `charts/arcadedb/.helmignore`:
 
 ```
 # Patterns to ignore when packaging Helm charts.
@@ -219,7 +219,7 @@ The `serviceaccount.yaml` template renders only when `serviceAccount.create: tru
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/serviceaccount_test.yaml`:
+Create `charts/arcadedb/tests/serviceaccount_test.yaml`:
 
 ```yaml
 suite: ServiceAccount
@@ -290,7 +290,7 @@ The `secret.yaml` template renders only when `arcadedb.credentials.rootPassword.
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/secret_test.yaml`:
+Create `charts/arcadedb/tests/secret_test.yaml`:
 
 ```yaml
 suite: Credentials Secret
@@ -345,7 +345,7 @@ git commit -m "test: add helm-unittest Secret suite"
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/service_test.yaml`:
+Create `charts/arcadedb/tests/service_test.yaml`:
 
 ```yaml
 suite: Service
@@ -512,7 +512,7 @@ git commit -m "test: add helm-unittest Service suite"
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/ingress_test.yaml`:
+Create `charts/arcadedb/tests/ingress_test.yaml`:
 
 ```yaml
 suite: Ingress
@@ -629,7 +629,7 @@ git commit -m "test: add helm-unittest Ingress suite"
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/networkpolicy_test.yaml`:
+Create `charts/arcadedb/tests/networkpolicy_test.yaml`:
 
 ```yaml
 suite: NetworkPolicy
@@ -724,7 +724,7 @@ git commit -m "test: add helm-unittest NetworkPolicy suite"
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/hpa_test.yaml`:
+Create `charts/arcadedb/tests/hpa_test.yaml`:
 
 ```yaml
 suite: HorizontalPodAutoscaler
@@ -847,7 +847,7 @@ This suite covers `fail`-based invariants. Two distinct sources of failures:
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/quorum_guard_test.yaml`:
+Create `charts/arcadedb/tests/quorum_guard_test.yaml`:
 
 ```yaml
 suite: Quorum guard and helper fail-assertions
@@ -931,7 +931,7 @@ helm-unittest renders NOTES.txt as a single document under `templates: [NOTES.tx
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/notes_test.yaml`:
+Create `charts/arcadedb/tests/notes_test.yaml`:
 
 ```yaml
 suite: NOTES.txt
@@ -1012,7 +1012,7 @@ git commit -m "test: add helm-unittest NOTES.txt suite"
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/extra_manifests_test.yaml`:
+Create `charts/arcadedb/tests/extra_manifests_test.yaml`:
 
 ```yaml
 suite: Extra manifests
@@ -1089,7 +1089,7 @@ For helpers that emit shell flags, use `contains` against `spec.template.spec.co
 
 - [ ] **Step 1: Write the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/helpers_test.yaml`:
+Create `charts/arcadedb/tests/helpers_test.yaml`:
 
 ```yaml
 suite: Template helpers (asserted via StatefulSet)
@@ -1222,7 +1222,7 @@ The StatefulSet suite is large enough to write in two passes for clarity. Part A
 
 - [ ] **Step 1: Write part A of the suite**
 
-Create `/Users/frank/projects/arcade/arcadedb-helm/charts/arcadedb/tests/statefulset_test.yaml`:
+Create `charts/arcadedb/tests/statefulset_test.yaml`:
 
 ```yaml
 suite: StatefulSet

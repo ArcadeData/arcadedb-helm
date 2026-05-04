@@ -237,6 +237,8 @@ tests:
     asserts:
       - isEmpty:
           path: spec.volumeClaimTemplates
+      - isEmpty:
+          path: spec.template.spec.containers[0].volumeMounts
 
   - it: persistence size and storageClass overrides flow through
     set:
