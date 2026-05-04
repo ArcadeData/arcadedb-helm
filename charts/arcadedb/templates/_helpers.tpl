@@ -114,6 +114,7 @@ Preparing a list of plugin ports to build plugin configurations.
         {{- if not $config.port }}
           {{- fail (printf "Custom plugin '%s' has no port specified." $plugin) -}}
         {{- end }}
+        {{- $port = $config.port }}
       {{- end }}
 {{ $plugin }}:
   port: {{ $port }}
