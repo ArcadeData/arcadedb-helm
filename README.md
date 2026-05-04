@@ -16,6 +16,20 @@ helm install my-arcadedb arcadedb/arcadedb
 
 See [charts/arcadedb/README.md](charts/arcadedb/README.md) and [charts/arcadedb/values.yaml](charts/arcadedb/values.yaml) for all available options.
 
+## Development
+
+Run checks locally:
+
+```bash
+make help              # list available targets
+make lint              # helm lint
+make test-unit         # helm-unittest suites (auto-installs the plugin)
+make test-integration  # kind-based end-to-end tests (requires Docker)
+make test              # run all of the above
+```
+
+Unit-test suites live in `charts/arcadedb/tests/` and use [helm-unittest](https://github.com/helm-unittest/helm-unittest). The plugin version is pinned in the `Makefile`.
+
 ## Release
 
 New chart versions are published via the GitHub Actions Release workflow:
