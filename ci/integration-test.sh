@@ -72,8 +72,8 @@ while true; do
     LOCAL=$(( HTTP_PORT + 10 + i ))   # 2490, 2491, 2492
     PID=$(pf_start "$i" "$LOCAL")
     pf_wait "$LOCAL" || { pf_stop "$PID"; continue; }
-    LEADER=$(api "$LOCAL" GET /api/v1/server \
-      | jq -r '.ha.leader // empty' 2>/dev/null || echo "")
+    LEADER=$(api "$LOCAL" GET /api/v1/cluster \
+      | jq -r '.leaderId // empty' 2>/dev/null || echo "")
     pf_stop "$PID"
     LEADERS+=("$LEADER")
   done
@@ -97,11 +97,18 @@ done
 
 # ── phase 3: write ────────────────────────────────────────────────────────────
 
-echo "==> [3/4] Writing test data via pod-0..."
-PF_PID=$(pf_start 0 "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to pod-0 failed"; exit 1; }
+# Writes (including database creation) must go through the Raft leader. Parse the
+# pod ordinal out of leaderId, e.g. "test-arcadedb-1.test-arcadedb.default..._2434" -> 1.
+LEADER_ORDINAL=$(echo "${LEADERS[0]}" | sed -nE "s/^${RELEASE}-([0-9]+)\..*$/\1/p")
+[[ -n "$LEADER_ORDINAL" ]] || { echo "ERROR: could not parse ordinal from leader '${LEADERS[0]}'"; exit 1; }
 
-api "$HTTP_PORT" POST /api/v1/create/integration-test >/dev/null
+echo "==> [3/4] Writing test data via leader pod-${LEADER_ORDINAL}..."
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
+
+api "$HTTP_PORT" POST /api/v1/server \
+  '{"command":"create database integration-test"}' \
+  >/dev/null
 
 api "$HTTP_PORT" POST /api/v1/command/integration-test \
   '{"language":"sql","command":"CREATE document TYPE TestDoc IF NOT EXISTS"}' \

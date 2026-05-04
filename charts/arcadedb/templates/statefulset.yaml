@@ -6,6 +6,7 @@ metadata:
     {{- include "arcadedb.labels" . | nindent 4 }}
 spec:
   serviceName: {{ include "arcadedb.fullname" . }}
+  podManagementPolicy: Parallel
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
