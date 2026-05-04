@@ -1,0 +1,182 @@
+suite: StatefulSet
+templates:
+  - statefulset.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  - it: renders one StatefulSet by default
+    asserts:
+      - hasDocuments: { count: 1 }
+      - isKind: { of: StatefulSet }
+      - equal: { path: metadata.name, value: test-arcadedb }
+      - equal: { path: spec.serviceName, value: test-arcadedb }
+
+  - it: default replicas is 1
+    asserts:
+      - equal: { path: spec.replicas, value: 1 }
+
+  - it: replicas field is omitted when autoscaling is enabled
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 3
+      autoscaling.maxReplicas: 5
+    asserts:
+      - notExists: { path: spec.replicas }
+
+  - it: respects custom replicaCount
+    set:
+      replicaCount: 3
+    asserts:
+      - equal: { path: spec.replicas, value: 3 }
+
+  - it: selector matches expected app labels
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/name"]
+          value: arcadedb
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/instance"]
+          value: test
+
+  - it: image string composes registry/repository:tag, defaulting tag to AppVersion
+    asserts:
+      - equal:
+          path: "spec.template.spec.containers[0].image"
+          value: arcadedata/arcadedb:26.4.2
+
+  - it: image.tag override wins over AppVersion default
+    set:
+      image.tag: "27.0.0-rc1"
+    asserts:
+      - equal:
+          path: "spec.template.spec.containers[0].image"
+          value: arcadedata/arcadedb:27.0.0-rc1
+
+  - it: image.registry and image.repository overrides flow through
+    set:
+      image.registry: my-registry.example.com
+      image.repository: arcadedb-fork
+    asserts:
+      - equal:
+          path: "spec.template.spec.containers[0].image"
+          value: my-registry.example.com/arcadedb-fork:26.4.2
+
+  - it: image.pullPolicy default is IfNotPresent and is overridable
+    asserts:
+      - equal:
+          path: "spec.template.spec.containers[0].imagePullPolicy"
+          value: IfNotPresent
+
+  - it: image.pullPolicy override flows through
+    set:
+      image.pullPolicy: Always
+    asserts:
+      - equal:
+          path: "spec.template.spec.containers[0].imagePullPolicy"
+          value: Always
+
+  - it: container exposes http port 2480 and rpc port 2434 by default
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].ports"
+          content: { name: http, containerPort: 2480, protocol: TCP }
+      - contains:
+          path: "spec.template.spec.containers[0].ports"
+          content: { name: rpc, containerPort: 2434, protocol: TCP }
+
+  - it: container ports reflect custom service.http.port and service.rpc.port
+    set:
+      service.http.port: 9090
+      service.rpc.port: 5555
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].ports"
+          content: { name: http, containerPort: 9090, protocol: TCP }
+      - contains:
+          path: "spec.template.spec.containers[0].ports"
+          content: { name: rpc, containerPort: 5555, protocol: TCP }
+
+  - it: liveness and readiness probes default to /api/v1/ready on http port
+    asserts:
+      - equal:
+          path: "spec.template.spec.containers[0].livenessProbe.httpGet.path"
+          value: /api/v1/ready
+      - equal:
+          path: "spec.template.spec.containers[0].livenessProbe.httpGet.port"
+          value: http
+      - equal:
+          path: "spec.template.spec.containers[0].readinessProbe.httpGet.path"
+          value: /api/v1/ready
+      - equal:
+          path: "spec.template.spec.containers[0].readinessProbe.httpGet.port"
+          value: http
+
+  - it: HA flags are absent when replicaCount is 1 and autoscaling is disabled
+    asserts:
+      - notContains:
+          path: "spec.template.spec.containers[0].command"
+          content: "-Darcadedb.ha.enabled=true"
+      - notContains:
+          path: "spec.template.spec.containers[0].command"
+          content: "-Darcadedb.ha.k8s=true"
+
+  - it: HA flags render when replicaCount > 1
+    set:
+      replicaCount: 3
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].command"
+          content: "-Darcadedb.ha.enabled=true"
+      - contains:
+          path: "spec.template.spec.containers[0].command"
+          content: "-Darcadedb.ha.k8s=true"
+      - contains:
+          path: "spec.template.spec.containers[0].command"
+          content: "-Darcadedb.ha.raftPort=2434"
+
+  - it: HA flags render when autoscaling is enabled even with replicaCount 1
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 3
+      autoscaling.maxReplicas: 5
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].command"
+          content: "-Darcadedb.ha.enabled=true"
+
+  - it: serviceAccountName flows from arcadedb.serviceAccountName helper
+    asserts:
+      - equal: { path: spec.template.spec.serviceAccountName, value: test-arcadedb }
+
+  - it: serviceAccountName falls back to "default" when create=false and no name
+    set:
+      serviceAccount.create: false
+    asserts:
+      - equal: { path: spec.template.spec.serviceAccountName, value: default }
+
+  - it: serviceAccountName uses custom name when provided
+    set:
+      serviceAccount.name: my-sa
+    asserts:
+      - equal: { path: spec.template.spec.serviceAccountName, value: my-sa }
+
+  - it: env contains HOSTNAME from metadata.name field reference
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].env"
+          content:
+            name: HOSTNAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+
+  - it: env contains POD_ID from status.podIP field reference
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].env"
+          content:
+            name: POD_ID
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
