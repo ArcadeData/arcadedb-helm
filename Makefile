@@ -20,7 +20,7 @@ plugin-install:
 	@current=$$($(HELM) plugin list 2>/dev/null | awk '$$1=="unittest"{print $$2}'); \
 	if [ "$$current" != "$(HELM_UNITTEST_VERSION)" ]; then \
 	  $(HELM) plugin uninstall unittest 2>/dev/null || true; \
-	  $(HELM) plugin install https://github.com/helm-unittest/helm-unittest --version $(HELM_UNITTEST_VERSION) --verify=false; \
+	  $(HELM) plugin install https://github.com/helm-unittest/helm-unittest --version $(HELM_UNITTEST_VERSION); \
 	fi
 
 test-unit: plugin-install
