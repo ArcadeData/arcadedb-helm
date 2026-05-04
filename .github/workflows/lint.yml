@@ -75,7 +75,6 @@ jobs:
         run: |
           helm install test-arcadedb charts/arcadedb/ \
             --set replicaCount=3 \
-            --set image.tag=latest \
             --set persistence.enabled=false \
             --set arcadedb.defaultDatabases="" \
             --timeout 5m \
