@@ -19,5 +19,5 @@ updates:
       - dependencies
       - helm
     commit-message:
-      prefix: chart
+      prefix: chore
       include: scope
