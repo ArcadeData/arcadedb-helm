@@ -1,6 +1,6 @@
 # ArcadeDB Helm Chart
 
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/arcadedb)](https://artifacthub.io/packages/helm/arcadedb/arcadedb)
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/arcadedb)](https://artifacthub.io/packages/helm/arcadedb/arcadedb) [![CI](https://github.com/ArcadeData/arcadedb-helm/actions/workflows/lint.yml/badge.svg)](https://github.com/ArcadeData/arcadedb-helm/actions/workflows/lint.yml)
 
 The official Helm chart for [ArcadeDB](https://arcadedb.com/), a multi-model database supporting SQL, Cypher, Gremlin, MongoDB, and Redis protocols.
 
