@@ -298,6 +298,16 @@ echo "==> [8/8] Snapshot-install on follower recovery..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
+# The phase 7 helm upgrade rolling-restarted the StatefulSet (serverList grew
+# from 3 to 5 entries), wiping ephemeral in-memory data. Recreate the database
+# and TestDoc type before writing snapshot-trigger rows.
+api "$HTTP_PORT" POST /api/v1/server \
+  '{"command":"create database integration-test"}' \
+  >/dev/null 2>&1 || true
+api "$HTTP_PORT" POST /api/v1/command/integration-test \
+  '{"language":"sql","command":"CREATE document TYPE TestDoc IF NOT EXISTS"}' \
+  >/dev/null
+
 echo "    Writing 100 rows to push log past snapshotThreshold=50..."
 for i in $(seq 1 100); do
   api "$HTTP_PORT" POST /api/v1/command/integration-test \
