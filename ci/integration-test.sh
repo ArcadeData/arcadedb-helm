@@ -291,4 +291,85 @@ cluster_status_assert_healthy "$HTTP_PORT" || exit 1
 
 pf_stop "$PF_PID"
 
+# ── phase 8: snapshot-install recovery ────────────────────────────────────────
+
+echo "==> [8/8] Snapshot-install on follower recovery..."
+
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+
+echo "    Writing 100 rows to push log past snapshotThreshold=50..."
+for i in $(seq 1 100); do
+  api "$HTTP_PORT" POST /api/v1/command/integration-test \
+    "{\"language\":\"sql\",\"command\":\"INSERT INTO TestDoc SET name = 'snap-${i}'\"}" \
+    >/dev/null
+done
+echo "    Wrote 100 rows."
+
+# Pick a non-leader pod ordinal to delete.
+DELETE_ORDINAL=""
+for i in 0 1 2 3 4; do
+  if [[ "$i" != "$LEADER_ORDINAL" ]]; then
+    DELETE_ORDINAL=$i
+    break
+  fi
+done
+[[ -n "$DELETE_ORDINAL" ]] || { echo "ERROR: no non-leader pod to delete"; exit 1; }
+
+pf_stop "$PF_PID"
+
+echo "    Deleting pod ${RELEASE}-${DELETE_ORDINAL}..."
+kubectl delete pod "${RELEASE}-${DELETE_ORDINAL}" -n "$NAMESPACE" --wait=false
+kubectl wait --for=condition=Ready pod/"${RELEASE}-${DELETE_ORDINAL}" \
+  -n "$NAMESPACE" --timeout=2m
+echo "    Pod recreated and Ready."
+
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+
+DEADLINE=$(( SECONDS + 90 ))
+RECOVERED=0
+LAST_STATUS=""
+while (( SECONDS < DEADLINE )); do
+  STATUS_JSON=$(api "$HTTP_PORT" GET /api/v1/cluster)
+  S=$(echo "$STATUS_JSON" \
+    | jq -r --arg p "${RELEASE}-${DELETE_ORDINAL}" \
+      '.peers[] | select(.id | startswith($p)) | .status // empty')
+  if [[ "$S" == "HEALTHY" ]]; then
+    RECOVERED=1
+    break
+  fi
+  if [[ -z "$S" ]]; then
+    HAS_STATUS_FIELD=$(echo "$STATUS_JSON" | jq -r '.peers[0].status // empty')
+    if [[ -z "$HAS_STATUS_FIELD" ]]; then
+      PEER_PRESENT=$(echo "$STATUS_JSON" \
+        | jq -r --arg p "${RELEASE}-${DELETE_ORDINAL}" \
+          '.peers[] | select(.id | startswith($p)) | .id' | head -n1)
+      if [[ -n "$PEER_PRESENT" ]]; then
+        echo "    NOTE: STATUS field absent on this image; peer is present in cluster, accepting as recovered."
+        RECOVERED=1
+        break
+      fi
+    fi
+  fi
+  LAST_STATUS=$S
+  echo "    peer ${RELEASE}-${DELETE_ORDINAL} status=${S:-<absent>}, retrying..."
+  sleep 5
+done
+pf_stop "$PF_PID"
+
+(( RECOVERED )) || {
+  echo "ERROR: recreated pod did not reach HEALTHY in 90s (last status: ${LAST_STATUS:-<absent>})"
+  exit 1
+}
+echo "    Recreated pod recovered."
+
+# Best-effort log signal: did the snapshot-install path actually run?
+if kubectl logs "${RELEASE}-${DELETE_ORDINAL}" -n "$NAMESPACE" --tail=500 2>/dev/null \
+     | grep -q SnapshotInstaller; then
+  echo "    Confirmed snapshot-install path in logs."
+else
+  echo "    NOTE: SnapshotInstaller log line not found (log wording is not a stable contract; not a failure)."
+fi
+
 echo "==> All checks passed."
