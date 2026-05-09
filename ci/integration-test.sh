@@ -94,6 +94,33 @@ assert_quorum_n() {
   done
 }
 
+# cluster_status_assert_healthy <local-port>
+# Asserts no peer is STALLED or FALLING_BEHIND. Gracefully skips if the
+# `peers[].status` field is absent (image predates commit 203acdaac).
+cluster_status_assert_healthy() {
+  local port=$1
+  local status_json has_status stalled peer_count
+  status_json=$(api "$port" GET /api/v1/cluster) || {
+    echo "ERROR: cluster status API call failed"; return 1
+  }
+  has_status=$(echo "$status_json" | jq -r '.peers[0].status // empty')
+  if [[ -z "$has_status" ]]; then
+    echo "    WARNING: peers[].status field absent on this image; skipping STATUS assertion."
+    return 0
+  fi
+  stalled=$(echo "$status_json" \
+    | jq -r '.peers[] | select(.status=="STALLED" or .status=="FALLING_BEHIND") | .id' \
+    | head -n1)
+  if [[ -n "$stalled" ]]; then
+    echo "ERROR: peer $stalled has status STALLED/FALLING_BEHIND"
+    echo "$status_json" | jq '.peers'
+    return 1
+  fi
+  peer_count=$(echo "$status_json" | jq '.peers | length')
+  echo "    All ${peer_count} peers HEALTHY/CATCHING_UP."
+  return 0
+}
+
 # ── retrieve password ─────────────────────────────────────────────────────────
 
 PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
@@ -154,4 +181,15 @@ if [[ "$RESULT" != "hello-kind" ]]; then
 fi
 
 echo "    Got: '${RESULT}'"
+
+# ── phase 5: STATUS column ────────────────────────────────────────────────────
+
+echo "==> [5/8] Asserting STATUS=HEALTHY for all peers..."
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+
+cluster_status_assert_healthy "$HTTP_PORT" || exit 1
+
+pf_stop "$PF_PID"
+
 echo "==> All checks passed."
