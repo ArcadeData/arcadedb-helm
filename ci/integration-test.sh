@@ -262,4 +262,33 @@ echo "    Write via new leader succeeded."
 LEADERS[0]=$NEW_LEADER
 LEADER_ORDINAL=$NEW_LEADER_ORDINAL
 
+# ── phase 7: scale-up 3 -> 5 ──────────────────────────────────────────────────
+
+echo "==> [7/8] Scaling cluster from 3 to 5 replicas..."
+helm upgrade "$RELEASE" charts/arcadedb/ \
+  --reuse-values \
+  --set replicaCount=5 \
+  --wait --timeout 5m
+
+kubectl rollout status statefulset/"$RELEASE" \
+  -n "$NAMESPACE" --timeout=5m
+echo "    Rollout complete (5 pods Ready)."
+
+echo "    Re-checking quorum across 5 pods..."
+assert_quorum_n 5 || exit 1
+
+echo "    Re-asserting STATUS across all peers..."
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+
+PEER_COUNT=$(api "$HTTP_PORT" GET /api/v1/cluster | jq '.peers | length')
+[[ "$PEER_COUNT" == "5" ]] || {
+  echo "ERROR: expected 5 peers in cluster status, got ${PEER_COUNT}"
+  exit 1
+}
+
+cluster_status_assert_healthy "$HTTP_PORT" || exit 1
+
+pf_stop "$PF_PID"
+
 echo "==> All checks passed."
