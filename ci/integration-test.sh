@@ -192,4 +192,74 @@ cluster_status_assert_healthy "$HTTP_PORT" || exit 1
 
 pf_stop "$PF_PID"
 
+# ── phase 6: leadership transfer ──────────────────────────────────────────────
+
+echo "==> [6/8] Transferring Raft leadership..."
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+
+CURRENT_LEADER=${LEADERS[0]}
+TARGET_PEER=$(api "$HTTP_PORT" GET /api/v1/cluster \
+  | jq -r --arg leader "$CURRENT_LEADER" \
+    '.peers[] | select(.id != $leader) | .id' | head -n1)
+[[ -n "$TARGET_PEER" ]] || { echo "ERROR: no non-leader peer found"; exit 1; }
+echo "    Current leader: $CURRENT_LEADER"
+echo "    Transfer target: $TARGET_PEER"
+
+api "$HTTP_PORT" POST /api/v1/cluster/leader \
+  "{\"peerId\":\"$TARGET_PEER\"}" >/dev/null
+pf_stop "$PF_PID"
+
+# Wait up to 30s for the transfer to take effect on any pod we can reach.
+DEADLINE=$(( SECONDS + 30 ))
+NEW_LEADER=""
+while (( SECONDS < DEADLINE )); do
+  for i in 0 1 2; do
+    LOCAL=$(( HTTP_PORT + 20 + i ))
+    PID=$(pf_start "$i" "$LOCAL")
+    if pf_wait "$LOCAL" 5; then
+      L=$(api "$LOCAL" GET /api/v1/cluster | jq -r '.leaderId // empty' 2>/dev/null || echo "")
+      pf_stop "$PID"
+      if [[ "$L" == "$TARGET_PEER" ]]; then
+        NEW_LEADER="$L"
+        break 2
+      fi
+    else
+      pf_stop "$PID"
+    fi
+  done
+  sleep 2
+done
+
+[[ "$NEW_LEADER" == "$TARGET_PEER" ]] || {
+  echo "ERROR: leadership did not transfer; got '${NEW_LEADER:-<none>}'"
+  exit 1
+}
+echo "    New leader: $NEW_LEADER"
+
+# Verify writes via the new leader.
+NEW_LEADER_ORDINAL=$(echo "$NEW_LEADER" | sed -nE "s/^${RELEASE}-([0-9]+)\..*$/\1/p")
+PF_PID=$(pf_start "$NEW_LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to new leader failed"; exit 1; }
+
+api "$HTTP_PORT" POST /api/v1/command/integration-test \
+  '{"language":"sql","command":"INSERT INTO TestDoc SET name = '\''post-transfer'\''"}' \
+  >/dev/null
+
+POST_RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
+  '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''post-transfer'\''"}' \
+  | jq -r '.result[0].name // empty')
+
+pf_stop "$PF_PID"
+
+[[ "$POST_RESULT" == "post-transfer" ]] || {
+  echo "ERROR: write via new leader failed (got '${POST_RESULT:-<empty>}')"
+  exit 1
+}
+echo "    Write via new leader succeeded."
+
+# Update tracked leader for downstream phases.
+LEADERS[0]=$NEW_LEADER
+LEADER_ORDINAL=$NEW_LEADER_ORDINAL
+
 echo "==> All checks passed."
