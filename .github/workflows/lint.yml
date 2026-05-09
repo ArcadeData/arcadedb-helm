@@ -77,7 +77,6 @@ jobs:
             --set replicaCount=3 \
             --set persistence.enabled=false \
             --set arcadedb.defaultDatabases="" \
-            --set 'arcadedb.extraCommands={-Darcadedb.server.mode=production,-Darcadedb.ha.snapshotThreshold=50}' \
             --timeout 5m \
             --wait
 

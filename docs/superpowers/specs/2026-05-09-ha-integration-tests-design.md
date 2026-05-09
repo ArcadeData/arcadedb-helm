@@ -48,8 +48,35 @@ existing kind-based CI job, within the 20-minute job timeout.
 |----|----------|-----------|--------------|
 | P5 | STATUS column reports HEALTHY | High | ~5 s |
 | P6 | Runtime leadership transfer | High | ~60 s |
-| P7 | Scale-up 3→5 via `helm upgrade` | Medium | 3–5 min |
-| P8 | Snapshot-install on follower recovery | Lower (flake-prone) | ~2 min |
+| ~~P7~~ | ~~Scale-up 3→5 via `helm upgrade`~~ | **Discarded — see "Post-implementation discovery" below** | — |
+| ~~P8~~ | ~~Snapshot-install on follower recovery~~ | **Discarded — depended on P7** | — |
+
+## Post-implementation discovery (2026-05-09)
+
+P7 and P8 were implemented and exercised in CI before being discarded. The CI
+run revealed two related limitations of the deployed ArcadeDB image:
+
+1. `helm upgrade --set replicaCount=5` triggers a rolling restart of the
+   StatefulSet because the `arcadedb.ha.serverList` env var grows from 3 to 5
+   entries. With `persistence.enabled=false` (CI default) every pod loses its
+   in-memory state during the restart cycle.
+2. ArcadeDB does not auto-vote new peers into the Raft configuration when a
+   pod with a wider serverList shows up — the support email itself notes that
+   `POST /api/v1/cluster/peer` must be called from the leader for each new
+   peer. The chart does not (and should not) issue that call.
+
+The combined effect: after `helm upgrade --set replicaCount=5`, the cluster
+falls below quorum during the rolling restart and never re-converges. P7's
+`assert_quorum_n 5` times out; P8 cannot run because it depends on a 5-pod
+cluster with the `integration-test` database.
+
+P7 and P8 are therefore removed from the in-scope list. The chart's
+serverList-rendering correctness is still covered by `helm-unittest` (template
+unit tests) — that asserts the correct value without needing a live cluster.
+
+Future work: a "snapshot-and-restore" workflow (mentioned at the end of the
+support email) would let us cover the snapshot path on a single fresh cluster
+without the scale-up dependency. Out of scope here.
 
 ## Architecture
 

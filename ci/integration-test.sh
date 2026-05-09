@@ -131,21 +131,21 @@ PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
-echo "==> [1/8] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
+echo "==> [1/6] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
 echo "    All 3 pods Ready."
 
 # ── phase 2: raft formation ───────────────────────────────────────────────────
 
-echo "==> [2/8] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+echo "==> [2/6] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
 assert_quorum_n 3 || exit 1
 
 # ── phase 3: write ────────────────────────────────────────────────────────────
 
 # LEADER_ORDINAL is set by assert_quorum_n above.
 
-echo "==> [3/8] Writing test data via leader pod-${LEADER_ORDINAL}..."
+echo "==> [3/6] Writing test data via leader pod-${LEADER_ORDINAL}..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
 
@@ -165,7 +165,7 @@ echo "    Write complete."
 
 # ── phase 4: read and assert ──────────────────────────────────────────────────
 
-echo "==> [4/8] Reading back test data..."
+echo "==> [4/6] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
   | jq -r '.result[0].name // empty') || {
@@ -184,7 +184,7 @@ echo "    Got: '${RESULT}'"
 
 # ── phase 5: STATUS column ────────────────────────────────────────────────────
 
-echo "==> [5/8] Asserting STATUS=HEALTHY for all peers..."
+echo "==> [5/6] Asserting STATUS=HEALTHY for all peers..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -194,7 +194,7 @@ pf_stop "$PF_PID"
 
 # ── phase 6: leadership transfer ──────────────────────────────────────────────
 
-echo "==> [6/8] Transferring Raft leadership..."
+echo "==> [6/6] Transferring Raft leadership..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -262,124 +262,15 @@ echo "    Write via new leader succeeded."
 LEADERS[0]=$NEW_LEADER
 LEADER_ORDINAL=$NEW_LEADER_ORDINAL
 
-# ── phase 7: scale-up 3 -> 5 ──────────────────────────────────────────────────
-
-echo "==> [7/8] Scaling cluster from 3 to 5 replicas..."
-helm upgrade "$RELEASE" charts/arcadedb/ \
-  --reuse-values \
-  --set replicaCount=5 \
-  --wait --timeout 5m
-
-kubectl rollout status statefulset/"$RELEASE" \
-  -n "$NAMESPACE" --timeout=5m
-echo "    Rollout complete (5 pods Ready)."
-
-echo "    Re-checking quorum across 5 pods..."
-assert_quorum_n 5 || exit 1
-
-echo "    Re-asserting STATUS across all peers..."
-PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
-
-PEER_COUNT=$(api "$HTTP_PORT" GET /api/v1/cluster | jq '.peers | length')
-[[ "$PEER_COUNT" == "5" ]] || {
-  echo "ERROR: expected 5 peers in cluster status, got ${PEER_COUNT}"
-  exit 1
-}
-
-cluster_status_assert_healthy "$HTTP_PORT" || exit 1
-
-pf_stop "$PF_PID"
-
-# ── phase 8: snapshot-install recovery ────────────────────────────────────────
-
-echo "==> [8/8] Snapshot-install on follower recovery..."
-
-PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
-
-# The phase 7 helm upgrade rolling-restarted the StatefulSet (serverList grew
-# from 3 to 5 entries), wiping ephemeral in-memory data. Recreate the database
-# and TestDoc type before writing snapshot-trigger rows.
-api "$HTTP_PORT" POST /api/v1/server \
-  '{"command":"create database integration-test"}' \
-  >/dev/null 2>&1 || true
-api "$HTTP_PORT" POST /api/v1/command/integration-test \
-  '{"language":"sql","command":"CREATE document TYPE TestDoc IF NOT EXISTS"}' \
-  >/dev/null
-
-echo "    Writing 100 rows to push log past snapshotThreshold=50..."
-for i in $(seq 1 100); do
-  api "$HTTP_PORT" POST /api/v1/command/integration-test \
-    "{\"language\":\"sql\",\"command\":\"INSERT INTO TestDoc SET name = 'snap-${i}'\"}" \
-    >/dev/null
-done
-echo "    Wrote 100 rows."
-
-# Pick a non-leader pod ordinal to delete.
-DELETE_ORDINAL=""
-for i in 0 1 2 3 4; do
-  if [[ "$i" != "$LEADER_ORDINAL" ]]; then
-    DELETE_ORDINAL=$i
-    break
-  fi
-done
-[[ -n "$DELETE_ORDINAL" ]] || { echo "ERROR: no non-leader pod to delete"; exit 1; }
-
-pf_stop "$PF_PID"
-
-echo "    Deleting pod ${RELEASE}-${DELETE_ORDINAL}..."
-kubectl delete pod "${RELEASE}-${DELETE_ORDINAL}" -n "$NAMESPACE" --wait=false
-kubectl wait --for=condition=Ready pod/"${RELEASE}-${DELETE_ORDINAL}" \
-  -n "$NAMESPACE" --timeout=2m
-echo "    Pod recreated and Ready."
-
-PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
-
-DEADLINE=$(( SECONDS + 90 ))
-RECOVERED=0
-LAST_STATUS=""
-while (( SECONDS < DEADLINE )); do
-  STATUS_JSON=$(api "$HTTP_PORT" GET /api/v1/cluster)
-  S=$(echo "$STATUS_JSON" \
-    | jq -r --arg p "${RELEASE}-${DELETE_ORDINAL}" \
-      '.peers[] | select(.id | startswith($p)) | .status // empty')
-  if [[ "$S" == "HEALTHY" ]]; then
-    RECOVERED=1
-    break
-  fi
-  if [[ -z "$S" ]]; then
-    HAS_STATUS_FIELD=$(echo "$STATUS_JSON" | jq -r '.peers[0].status // empty')
-    if [[ -z "$HAS_STATUS_FIELD" ]]; then
-      PEER_PRESENT=$(echo "$STATUS_JSON" \
-        | jq -r --arg p "${RELEASE}-${DELETE_ORDINAL}" \
-          '.peers[] | select(.id | startswith($p)) | .id' | head -n1)
-      if [[ -n "$PEER_PRESENT" ]]; then
-        echo "    NOTE: STATUS field absent on this image; peer is present in cluster, accepting as recovered."
-        RECOVERED=1
-        break
-      fi
-    fi
-  fi
-  LAST_STATUS=$S
-  echo "    peer ${RELEASE}-${DELETE_ORDINAL} status=${S:-<absent>}, retrying..."
-  sleep 5
-done
-pf_stop "$PF_PID"
-
-(( RECOVERED )) || {
-  echo "ERROR: recreated pod did not reach HEALTHY in 90s (last status: ${LAST_STATUS:-<absent>})"
-  exit 1
-}
-echo "    Recreated pod recovered."
-
-# Best-effort log signal: did the snapshot-install path actually run?
-if kubectl logs "${RELEASE}-${DELETE_ORDINAL}" -n "$NAMESPACE" --tail=500 2>/dev/null \
-     | grep -q SnapshotInstaller; then
-  echo "    Confirmed snapshot-install path in logs."
-else
-  echo "    NOTE: SnapshotInstaller log line not found (log wording is not a stable contract; not a failure)."
-fi
+# Phases 7 (helm-upgrade scale-up 3->5) and 8 (snapshot-install recovery) were
+# planned but discarded after CI proved the scenarios are not supported by the
+# current ArcadeDB image: a `helm upgrade --set replicaCount=5` rolling-restarts
+# all StatefulSet pods AND adds two with a serverList of 5 entries, but Raft
+# does not auto-vote in the new peers (the support email confirms this requires
+# an explicit POST /api/v1/cluster/peer call from the leader). The cluster ends
+# up unable to re-form quorum after the rolling restart. The snapshot-install
+# phase depended on the post-scale-up cluster, so it was dropped with phase 7.
+# See docs/superpowers/specs/2026-05-09-ha-integration-tests-design.md for the
+# updated rationale.
 
 echo "==> All checks passed."
