@@ -460,3 +460,105 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.defaultDatabases=Universe[admin:pwd]"
+
+  # ── config persistence ──────────────────────────────────────────────────────
+
+  - it: config persistence disabled by default — no config volumeMount or VCT
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-config
+            mountPath: /home/arcadedb/config
+      - notExists:
+          path: spec.volumeClaimTemplates[1]
+
+  - it: config persistence enabled renders volumeMount at configDirectory
+    set:
+      persistence.config.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-config
+            mountPath: /home/arcadedb/config
+
+  - it: config persistence enabled renders VolumeClaimTemplate for arcadedb-config
+    set:
+      persistence.config.enabled: true
+    asserts:
+      - contains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: arcadedb-config
+            spec:
+              accessModes: [ReadWriteOnce]
+              resources:
+                requests:
+                  storage: 1Gi
+
+  - it: config persistence size override flows through
+    set:
+      persistence.config.enabled: true
+      persistence.config.size: 5Gi
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[1].spec.resources.requests.storage
+          value: 5Gi
+
+  - it: config persistence storageClass override flows through
+    set:
+      persistence.config.enabled: true
+      persistence.config.storageClass: fast-ssd
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[1].spec.storageClassName
+          value: fast-ssd
+
+  - it: config persistence accessMode override flows through
+    set:
+      persistence.config.enabled: true
+      persistence.config.accessMode: ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[1].spec.accessModes[0]
+          value: ReadWriteMany
+
+  - it: arcadedb.configDirectory override flows through to config volumeMount mountPath
+    set:
+      persistence.config.enabled: true
+      arcadedb.configDirectory: /custom/config
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-config
+            mountPath: /custom/config
+
+  - it: config VCT is second entry after data VCT when both persistence flags enabled
+    set:
+      persistence.config.enabled: true
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: arcadedb-data
+      - equal:
+          path: spec.volumeClaimTemplates[1].metadata.name
+          value: arcadedb-config
+
+  - it: config persistence enabled with data persistence disabled still renders config VCT
+    set:
+      persistence.enabled: false
+      persistence.config.enabled: true
+    asserts:
+      - contains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: arcadedb-config
+            spec:
+              accessModes: [ReadWriteOnce]
+              resources:
+                requests:
+                  storage: 1Gi
