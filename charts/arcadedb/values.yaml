@@ -5,6 +5,8 @@ replicaCount: 1
 arcadedb:
   ## @param arcadedb.databaseDirectory Database storage directory inside the container
   databaseDirectory: "/home/arcadedb/databases"
+  ## @param arcadedb.configDirectory Config storage directory inside the container (users, tokens, server settings)
+  configDirectory: "/home/arcadedb/config"
   ## @param arcadedb.defaultDatabases Databases to create at startup. Empty = none.
   ## Example: "Universe[admin:password]"
   defaultDatabases: ""
@@ -181,6 +183,19 @@ persistence:
   accessMode: ReadWriteOnce
   ## @param persistence.storageClass StorageClass name. Empty = cluster default.
   storageClass: ""
+
+  ## @section persistence.config
+  ## Persist the config directory (users, tokens, server settings).
+  ## Without this, configured users and tokens are lost on pod restart.
+  config:
+    ## @param persistence.config.enabled Persist the config directory with a separate PVC.
+    enabled: false
+    ## @param persistence.config.size PVC size for the config directory
+    size: 1Gi
+    ## @param persistence.config.accessMode PVC access mode for config
+    accessMode: ReadWriteOnce
+    ## @param persistence.config.storageClass StorageClass name for config PVC. Empty = cluster default.
+    storageClass: ""
 
 ## @param volumes Additional pod volumes
 volumes: []
