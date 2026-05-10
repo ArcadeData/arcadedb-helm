@@ -46,6 +46,81 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# assert_quorum_n <expected-pod-count> [timeout-seconds]
+# Polls all pods 0..N-1 until they all report the same non-empty leaderId.
+# On success: exports LEADERS[] (array of leaderIds, one per pod) and
+# LEADER_ORDINAL (the pod ordinal of the leader).
+assert_quorum_n() {
+  local n=$1 timeout=${2:-$RAFT_TIMEOUT}
+  local deadline=$(( SECONDS + timeout ))
+  local i pid local_port l
+  while true; do
+    LEADERS=()
+    for (( i=0; i<n; i++ )); do
+      local_port=$(( HTTP_PORT + 10 + i ))
+      pid=$(pf_start "$i" "$local_port")
+      if pf_wait "$local_port"; then
+        l=$(api "$local_port" GET /api/v1/cluster \
+          | jq -r '.leaderId // empty' 2>/dev/null || echo "")
+        LEADERS+=("$l")
+      fi
+      pf_stop "$pid"
+    done
+
+    if (( ${#LEADERS[@]} == n )) && [[ -n "${LEADERS[0]}" ]]; then
+      local all_agree=1
+      for l in "${LEADERS[@]:1}"; do
+        [[ "$l" == "${LEADERS[0]}" ]] || { all_agree=0; break; }
+      done
+      if (( all_agree )); then
+        LEADER_ORDINAL=$(echo "${LEADERS[0]}" \
+          | sed -nE "s/^${RELEASE}-([0-9]+)\..*$/\1/p")
+        [[ -n "$LEADER_ORDINAL" ]] || {
+          echo "ERROR: could not parse ordinal from leader '${LEADERS[0]}'"
+          return 1
+        }
+        echo "    Raft leader: ${LEADERS[0]} (pod-${LEADER_ORDINAL})"
+        return 0
+      fi
+    fi
+
+    if (( SECONDS >= deadline )); then
+      echo "ERROR: Raft formation on ${n} pods timed out after ${timeout}s."
+      echo "       Leaders seen: ${LEADERS[*]:-<none>}"
+      return 1
+    fi
+    echo "    Not converged yet (${LEADERS[*]:-<none>}), retrying in 5s..."
+    sleep 5
+  done
+}
+
+# cluster_status_assert_healthy <local-port>
+# Asserts no peer is STALLED or FALLING_BEHIND. Gracefully skips if the
+# `peers[].status` field is absent (image predates commit 203acdaac).
+cluster_status_assert_healthy() {
+  local port=$1
+  local status_json has_status stalled peer_count
+  status_json=$(api "$port" GET /api/v1/cluster) || {
+    echo "ERROR: cluster status API call failed"; return 1
+  }
+  has_status=$(echo "$status_json" | jq -r '.peers[0].status // empty')
+  if [[ -z "$has_status" ]]; then
+    echo "    WARNING: peers[].status field absent on this image; skipping STATUS assertion."
+    return 0
+  fi
+  stalled=$(echo "$status_json" \
+    | jq -r '.peers[] | select(.status=="STALLED" or .status=="FALLING_BEHIND") | .id' \
+    | head -n1)
+  if [[ -n "$stalled" ]]; then
+    echo "ERROR: peer $stalled has status STALLED/FALLING_BEHIND"
+    echo "$status_json" | jq '.peers'
+    return 1
+  fi
+  peer_count=$(echo "$status_json" | jq '.peers | length')
+  echo "    All ${peer_count} peers HEALTHY/CATCHING_UP."
+  return 0
+}
+
 # ── retrieve password ─────────────────────────────────────────────────────────
 
 PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
@@ -56,53 +131,21 @@ PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
-echo "==> [1/4] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
+echo "==> [1/6] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
 echo "    All 3 pods Ready."
 
 # ── phase 2: raft formation ───────────────────────────────────────────────────
 
-echo "==> [2/4] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
-DEADLINE=$(( SECONDS + RAFT_TIMEOUT ))
-
-while true; do
-  LEADERS=()
-  for i in 0 1 2; do
-    LOCAL=$(( HTTP_PORT + 10 + i ))   # 2490, 2491, 2492
-    PID=$(pf_start "$i" "$LOCAL")
-    pf_wait "$LOCAL" || { pf_stop "$PID"; continue; }
-    LEADER=$(api "$LOCAL" GET /api/v1/cluster \
-      | jq -r '.leaderId // empty' 2>/dev/null || echo "")
-    pf_stop "$PID"
-    LEADERS+=("$LEADER")
-  done
-
-  if [[ -n "${LEADERS[0]}" \
-     && "${LEADERS[0]}" == "${LEADERS[1]}" \
-     && "${LEADERS[0]}" == "${LEADERS[2]}" ]]; then
-    echo "    Raft leader: ${LEADERS[0]}"
-    break
-  fi
-
-  if (( SECONDS >= DEADLINE )); then
-    echo "ERROR: Raft formation timed out after ${RAFT_TIMEOUT}s."
-    echo "       Leaders seen: ${LEADERS[*]:-<none>}"
-    exit 1
-  fi
-
-  echo "    Not converged yet (${LEADERS[*]:-<none>}), retrying in 5s..."
-  sleep 5
-done
+echo "==> [2/6] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+assert_quorum_n 3 || exit 1
 
 # ── phase 3: write ────────────────────────────────────────────────────────────
 
-# Writes (including database creation) must go through the Raft leader. Parse the
-# pod ordinal out of leaderId, e.g. "test-arcadedb-1.test-arcadedb.default..._2434" -> 1.
-LEADER_ORDINAL=$(echo "${LEADERS[0]}" | sed -nE "s/^${RELEASE}-([0-9]+)\..*$/\1/p")
-[[ -n "$LEADER_ORDINAL" ]] || { echo "ERROR: could not parse ordinal from leader '${LEADERS[0]}'"; exit 1; }
+# LEADER_ORDINAL is set by assert_quorum_n above.
 
-echo "==> [3/4] Writing test data via leader pod-${LEADER_ORDINAL}..."
+echo "==> [3/6] Writing test data via leader pod-${LEADER_ORDINAL}..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
 
@@ -122,7 +165,7 @@ echo "    Write complete."
 
 # ── phase 4: read and assert ──────────────────────────────────────────────────
 
-echo "==> [4/4] Reading back test data..."
+echo "==> [4/6] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
   | jq -r '.result[0].name // empty') || {
@@ -138,4 +181,96 @@ if [[ "$RESULT" != "hello-kind" ]]; then
 fi
 
 echo "    Got: '${RESULT}'"
+
+# ── phase 5: STATUS column ────────────────────────────────────────────────────
+
+echo "==> [5/6] Asserting STATUS=HEALTHY for all peers..."
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+
+cluster_status_assert_healthy "$HTTP_PORT" || exit 1
+
+pf_stop "$PF_PID"
+
+# ── phase 6: leadership transfer ──────────────────────────────────────────────
+
+echo "==> [6/6] Transferring Raft leadership..."
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+
+CURRENT_LEADER=${LEADERS[0]}
+TARGET_PEER=$(api "$HTTP_PORT" GET /api/v1/cluster \
+  | jq -r --arg leader "$CURRENT_LEADER" \
+    '.peers[] | select(.id != $leader) | .id' | head -n1)
+[[ -n "$TARGET_PEER" ]] || { echo "ERROR: no non-leader peer found"; exit 1; }
+echo "    Current leader: $CURRENT_LEADER"
+echo "    Transfer target: $TARGET_PEER"
+
+api "$HTTP_PORT" POST /api/v1/cluster/leader \
+  "{\"peerId\":\"$TARGET_PEER\"}" >/dev/null
+pf_stop "$PF_PID"
+
+# Wait up to 30s for the transfer to take effect on any pod we can reach.
+DEADLINE=$(( SECONDS + 30 ))
+NEW_LEADER=""
+while (( SECONDS < DEADLINE )); do
+  for i in 0 1 2; do
+    LOCAL=$(( HTTP_PORT + 20 + i ))
+    PID=$(pf_start "$i" "$LOCAL")
+    if pf_wait "$LOCAL" 5; then
+      L=$(api "$LOCAL" GET /api/v1/cluster | jq -r '.leaderId // empty' 2>/dev/null || echo "")
+      pf_stop "$PID"
+      if [[ "$L" == "$TARGET_PEER" ]]; then
+        NEW_LEADER="$L"
+        break 2
+      fi
+    else
+      pf_stop "$PID"
+    fi
+  done
+  sleep 2
+done
+
+[[ "$NEW_LEADER" == "$TARGET_PEER" ]] || {
+  echo "ERROR: leadership did not transfer; got '${NEW_LEADER:-<none>}'"
+  exit 1
+}
+echo "    New leader: $NEW_LEADER"
+
+# Verify writes via the new leader.
+NEW_LEADER_ORDINAL=$(echo "$NEW_LEADER" | sed -nE "s/^${RELEASE}-([0-9]+)\..*$/\1/p")
+PF_PID=$(pf_start "$NEW_LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to new leader failed"; exit 1; }
+
+api "$HTTP_PORT" POST /api/v1/command/integration-test \
+  '{"language":"sql","command":"INSERT INTO TestDoc SET name = '\''post-transfer'\''"}' \
+  >/dev/null
+
+POST_RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
+  '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''post-transfer'\''"}' \
+  | jq -r '.result[0].name // empty')
+
+pf_stop "$PF_PID"
+
+[[ "$POST_RESULT" == "post-transfer" ]] || {
+  echo "ERROR: write via new leader failed (got '${POST_RESULT:-<empty>}')"
+  exit 1
+}
+echo "    Write via new leader succeeded."
+
+# Update tracked leader for downstream phases.
+LEADERS[0]=$NEW_LEADER
+LEADER_ORDINAL=$NEW_LEADER_ORDINAL
+
+# Phases 7 (helm-upgrade scale-up 3->5) and 8 (snapshot-install recovery) were
+# planned but discarded after CI proved the scenarios are not supported by the
+# current ArcadeDB image: a `helm upgrade --set replicaCount=5` rolling-restarts
+# all StatefulSet pods AND adds two with a serverList of 5 entries, but Raft
+# does not auto-vote in the new peers (the support email confirms this requires
+# an explicit POST /api/v1/cluster/peer call from the leader). The cluster ends
+# up unable to re-form quorum after the rolling restart. The snapshot-install
+# phase depended on the post-scale-up cluster, so it was dropped with phase 7.
+# See docs/superpowers/specs/2026-05-09-ha-integration-tests-design.md for the
+# updated rationale.
+
 echo "==> All checks passed."
