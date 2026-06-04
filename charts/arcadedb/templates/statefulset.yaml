@@ -62,6 +62,7 @@ spec:
             - -Darcadedb.ha.k8sSuffix={{ include "arcadedb.k8sSuffix" . }}
             - -Darcadedb.ha.serverList={{ include "arcadedb.nodenames" . }}
             - -Darcadedb.ha.raftPort={{ .Values.service.rpc.port }}
+            - -Darcadedb.ha.raftStorageDirectory={{ .Values.arcadedb.ha.raftStorageDirectory }}
             {{- end }}
             {{- with .Values.arcadedb.extraCommands }}
             {{- toYaml . | nindent 12 }}
@@ -80,13 +81,17 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
-            {{- if .Values.persistence.enabled }}
             - name: arcadedb-data
               mountPath: {{ .Values.arcadedb.databaseDirectory }}
-            {{- end }}
-            {{- if .Values.persistence.config.enabled }}
             - name: arcadedb-config
               mountPath: {{ .Values.arcadedb.configDirectory }}
+            - name: arcadedb-logs
+              mountPath: {{ .Values.arcadedb.logsDirectory }}
+            - name: arcadedb-tmp
+              mountPath: /tmp
+            {{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled }}
+            - name: arcadedb-raft
+              mountPath: {{ .Values.arcadedb.ha.raftStorageDirectory }}
             {{- end }}
             {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
@@ -113,13 +118,31 @@ spec:
                   name: arcadedb-credentials-secret
                   key: rootPassword
               {{- end }}
+            - name: ARCADEDB_LOG_DIR
+              value: {{ .Values.arcadedb.logsDirectory | quote }}
             {{- with .Values.arcadedb.extraEnvironment }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-      {{- with .Values.volumes }}
       volumes:
+        - name: arcadedb-logs
+          emptyDir: {}
+        - name: arcadedb-tmp
+          emptyDir: {}
+        {{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled }}
+        - name: arcadedb-raft
+          emptyDir: {}
+        {{- end }}
+        {{- if not .Values.persistence.enabled }}
+        - name: arcadedb-data
+          emptyDir: {}
+        {{- end }}
+        {{- if not .Values.persistence.config.enabled }}
+        - name: arcadedb-config
+          emptyDir: {}
+        {{- end }}
+        {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

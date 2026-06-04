@@ -25,3 +25,10 @@
 WARNING: persistence.enabled is false. Database data is EPHEMERAL and will be lost when pods restart.
          Set persistence.enabled=true (the default) for any non-ephemeral deployment.
 {{- end }}
+{{- if .Values.securityContext.readOnlyRootFilesystem }}
+
+NOTE: The container root filesystem is read-only by default (securityContext.readOnlyRootFilesystem=true).
+      ArcadeDB's database, config, logs, Raft storage, and /tmp are backed by writable mounts automatically.
+      If you add sidecars/init containers or custom paths that write to the root filesystem, either mount a
+      writable volume for them or set securityContext.readOnlyRootFilesystem=false.
+{{- end }}

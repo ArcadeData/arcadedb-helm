@@ -15,6 +15,17 @@ arcadedb:
     - -Darcadedb.server.mode=production
   ## @param arcadedb.extraEnvironment Additional environment variables for the container
   extraEnvironment: []
+  ## @param arcadedb.logsDirectory Directory where the server writes log files.
+  ## Backed by a writable emptyDir and forwarded via the ARCADEDB_LOG_DIR env var
+  ## so logging works under readOnlyRootFilesystem.
+  logsDirectory: "/home/arcadedb/log"
+
+  ## @section arcadedb.ha
+  ha:
+    ## @param arcadedb.ha.raftStorageDirectory Parent directory for the per-node
+    ## raft-storage-<node> folders. Backed by a writable emptyDir; only used when
+    ## HA is active (replicaCount > 1 or autoscaling enabled).
+    raftStorageDirectory: "/home/arcadedb/raft"
 
   ## @section arcadedb.credentials
   credentials:
@@ -97,6 +108,10 @@ securityContext:
   runAsUser: 1000
   runAsGroup: 1000
   allowPrivilegeEscalation: false
+  ## readOnlyRootFilesystem hardens the container; the chart provides writable
+  ## emptyDir mounts for logs, /tmp, Raft storage, and (when their PVCs are
+  ## disabled) the database and config directories.
+  readOnlyRootFilesystem: true
   capabilities:
     drop: [ALL]
 
@@ -197,23 +212,26 @@ persistence:
     ## @param persistence.config.storageClass StorageClass name for config PVC. Empty = cluster default.
     storageClass: ""
 
-## @param volumes Additional pod volumes
+## @param volumes Additional pod volumes.
+## Reserved names managed by the chart — do NOT reuse them here:
+## arcadedb-data, arcadedb-config, arcadedb-logs, arcadedb-tmp, arcadedb-raft.
 volumes: []
-# - name: arcadedb-config
+# - name: extra-config
 #   configMap:
 #     name: my-arcadedb-config
 
 ## @param volumeMounts Additional container volume mounts
 volumeMounts: []
-# - name: arcadedb-config
-#   mountPath: /home/arcadedb/config
+# - name: extra-config
+#   mountPath: /etc/arcadedb/extra
 #   readOnly: true
 
-## @param volumeClaimTemplates Extra StatefulSet volumeClaimTemplates (for config, replication, backups, log).
-## The database-data PVC is controlled by persistence.enabled above.
+## @param volumeClaimTemplates Extra StatefulSet volumeClaimTemplates (e.g. replication, backups).
+## The database and config PVCs are controlled by persistence.* above; do not redeclare
+## arcadedb-data or arcadedb-config here.
 volumeClaimTemplates: []
 # - metadata:
-#     name: arcadedb-config
+#     name: arcadedb-backups
 #   spec:
 #     accessModes:
 #       - ReadWriteOnce

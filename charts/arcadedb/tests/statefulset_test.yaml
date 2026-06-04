@@ -47,7 +47,7 @@ tests:
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].image"
-          value: arcadedata/arcadedb:26.4.2
+          value: arcadedata/arcadedb:26.6.1
 
   - it: image.tag override wins over AppVersion default
     set:
@@ -64,7 +64,7 @@ tests:
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].image"
-          value: my-registry.example.com/arcadedb-fork:26.4.2
+          value: my-registry.example.com/arcadedb-fork:26.6.1
 
   - it: image.pullPolicy default is IfNotPresent and is overridable
     asserts:
@@ -204,6 +204,9 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].securityContext.capabilities.drop[0]
           value: ALL
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
 
   - it: pod-level security context can be overridden
     set:
@@ -231,14 +234,22 @@ tests:
           path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
           value: 8Gi
 
-  - it: persistence disabled removes volumeMount and volumeClaimTemplate
+  - it: persistence disabled drops the data VCT and backs the data dir with an emptyDir
     set:
       persistence.enabled: false
     asserts:
       - isEmpty:
           path: spec.volumeClaimTemplates
-      - isEmpty:
+      - contains:
           path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-data
+            mountPath: /home/arcadedb/databases
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-data
+            emptyDir: {}
 
   - it: persistence size and storageClass overrides flow through
     set:
@@ -430,7 +441,7 @@ tests:
   - it: extra volumeClaimTemplates flow through alongside the data PVC
     set:
       volumeClaimTemplates:
-        - metadata: { name: arcadedb-config }
+        - metadata: { name: arcadedb-backups }
           spec:
             accessModes: [ReadWriteOnce]
             resources: { requests: { storage: 1Gi } }
@@ -438,7 +449,7 @@ tests:
       - lengthEqual: { path: spec.volumeClaimTemplates, count: 2 }
       - equal:
           path: spec.volumeClaimTemplates[1].metadata.name
-          value: arcadedb-config
+          value: arcadedb-backups
 
   - it: command includes default databaseDirectory and defaultDatabases flags
     asserts:
@@ -463,13 +474,18 @@ tests:
 
   # ── config persistence ──────────────────────────────────────────────────────
 
-  - it: config persistence disabled by default — no config volumeMount or VCT
+  - it: config persistence disabled by default — config dir is a writable emptyDir, no VCT
     asserts:
-      - notContains:
+      - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: arcadedb-config
             mountPath: /home/arcadedb/config
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-config
+            emptyDir: {}
       - notExists:
           path: spec.volumeClaimTemplates[1]
 
@@ -562,3 +578,137 @@ tests:
               resources:
                 requests:
                   storage: 1Gi
+
+  - it: log dir is wired via ARCADEDB_LOG_DIR and backed by a writable emptyDir
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ARCADEDB_LOG_DIR
+            value: /home/arcadedb/log
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-logs
+            mountPath: /home/arcadedb/log
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-logs
+            emptyDir: {}
+
+  - it: a writable emptyDir is mounted at /tmp for the JVM
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-tmp
+            emptyDir: {}
+
+  - it: arcadedb.logsDirectory override flows through to env and mount
+    set:
+      arcadedb.logsDirectory: /var/log/arcadedb
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ARCADEDB_LOG_DIR
+            value: /var/log/arcadedb
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-logs
+            mountPath: /var/log/arcadedb
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-logs
+            emptyDir: {}
+
+  - it: config persistence enabled uses the PVC, not an emptyDir
+    set:
+      persistence.config.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-config
+            emptyDir: {}
+
+  - it: HA active wires raftStorageDirectory arg and a writable raft emptyDir
+    set:
+      replicaCount: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.raftStorageDirectory=/home/arcadedb/raft
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-raft
+            mountPath: /home/arcadedb/raft
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-raft
+            emptyDir: {}
+
+  - it: single-node has no raft storage wiring
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.raftStorageDirectory=/home/arcadedb/raft
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-raft
+            mountPath: /home/arcadedb/raft
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-raft
+            emptyDir: {}
+
+  - it: raftStorageDirectory override flows through when HA active
+    set:
+      replicaCount: 3
+      arcadedb.ha.raftStorageDirectory: /data/raft
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.raftStorageDirectory=/data/raft
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-raft
+            mountPath: /data/raft
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-raft
+            emptyDir: {}
+
+  - it: autoscaling enabled wires raft volume and mount even when replicaCount is 1
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 2
+      autoscaling.maxReplicas: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.raftStorageDirectory=/home/arcadedb/raft
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-raft
+            mountPath: /home/arcadedb/raft
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-raft
+            emptyDir: {}
