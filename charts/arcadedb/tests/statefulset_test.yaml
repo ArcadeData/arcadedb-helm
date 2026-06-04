@@ -441,7 +441,7 @@ tests:
   - it: extra volumeClaimTemplates flow through alongside the data PVC
     set:
       volumeClaimTemplates:
-        - metadata: { name: arcadedb-config }
+        - metadata: { name: arcadedb-backups }
           spec:
             accessModes: [ReadWriteOnce]
             resources: { requests: { storage: 1Gi } }
@@ -449,7 +449,7 @@ tests:
       - lengthEqual: { path: spec.volumeClaimTemplates, count: 2 }
       - equal:
           path: spec.volumeClaimTemplates[1].metadata.name
-          value: arcadedb-config
+          value: arcadedb-backups
 
   - it: command includes default databaseDirectory and defaultDatabases flags
     asserts:
@@ -624,6 +624,11 @@ tests:
           content:
             name: arcadedb-logs
             mountPath: /var/log/arcadedb
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-logs
+            emptyDir: {}
 
   - it: config persistence enabled uses the PVC, not an emptyDir
     set:
@@ -659,6 +664,11 @@ tests:
           path: spec.template.spec.containers[0].command
           content: -Darcadedb.ha.raftStorageDirectory=/home/arcadedb/raft
       - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-raft
+            mountPath: /home/arcadedb/raft
+      - notContains:
           path: spec.template.spec.volumes
           content:
             name: arcadedb-raft
@@ -677,3 +687,28 @@ tests:
           content:
             name: arcadedb-raft
             mountPath: /data/raft
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-raft
+            emptyDir: {}
+
+  - it: autoscaling enabled wires raft volume and mount even when replicaCount is 1
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 2
+      autoscaling.maxReplicas: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.raftStorageDirectory=/home/arcadedb/raft
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-raft
+            mountPath: /home/arcadedb/raft
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-raft
+            emptyDir: {}

@@ -212,23 +212,26 @@ persistence:
     ## @param persistence.config.storageClass StorageClass name for config PVC. Empty = cluster default.
     storageClass: ""
 
-## @param volumes Additional pod volumes
+## @param volumes Additional pod volumes.
+## Reserved names managed by the chart — do NOT reuse them here:
+## arcadedb-data, arcadedb-config, arcadedb-logs, arcadedb-tmp, arcadedb-raft.
 volumes: []
-# - name: arcadedb-config
+# - name: extra-config
 #   configMap:
 #     name: my-arcadedb-config
 
 ## @param volumeMounts Additional container volume mounts
 volumeMounts: []
-# - name: arcadedb-config
-#   mountPath: /home/arcadedb/config
+# - name: extra-config
+#   mountPath: /etc/arcadedb/extra
 #   readOnly: true
 
-## @param volumeClaimTemplates Extra StatefulSet volumeClaimTemplates (for config, replication, backups, log).
-## The database-data PVC is controlled by persistence.enabled above.
+## @param volumeClaimTemplates Extra StatefulSet volumeClaimTemplates (e.g. replication, backups).
+## The database and config PVCs are controlled by persistence.* above; do not redeclare
+## arcadedb-data or arcadedb-config here.
 volumeClaimTemplates: []
 # - metadata:
-#     name: arcadedb-config
+#     name: arcadedb-backups
 #   spec:
 #     accessModes:
 #       - ReadWriteOnce
