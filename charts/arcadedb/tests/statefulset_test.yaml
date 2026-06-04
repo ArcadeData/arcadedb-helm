@@ -234,14 +234,22 @@ tests:
           path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
           value: 8Gi
 
-  - it: persistence disabled removes volumeMount and volumeClaimTemplate
+  - it: persistence disabled drops the data VCT and backs the data dir with an emptyDir
     set:
       persistence.enabled: false
     asserts:
       - isEmpty:
           path: spec.volumeClaimTemplates
-      - isEmpty:
+      - contains:
           path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-data
+            mountPath: /home/arcadedb/databases
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-data
+            emptyDir: {}
 
   - it: persistence size and storageClass overrides flow through
     set:
@@ -466,13 +474,18 @@ tests:
 
   # ── config persistence ──────────────────────────────────────────────────────
 
-  - it: config persistence disabled by default — no config volumeMount or VCT
+  - it: config persistence disabled by default — config dir is a writable emptyDir, no VCT
     asserts:
-      - notContains:
+      - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: arcadedb-config
             mountPath: /home/arcadedb/config
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-config
+            emptyDir: {}
       - notExists:
           path: spec.volumeClaimTemplates[1]
 
@@ -565,3 +578,59 @@ tests:
               resources:
                 requests:
                   storage: 1Gi
+
+  - it: log dir is wired via ARCADEDB_LOG_DIR and backed by a writable emptyDir
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ARCADEDB_LOG_DIR
+            value: /home/arcadedb/log
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-logs
+            mountPath: /home/arcadedb/log
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-logs
+            emptyDir: {}
+
+  - it: a writable emptyDir is mounted at /tmp for the JVM
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-tmp
+            emptyDir: {}
+
+  - it: arcadedb.logsDirectory override flows through to env and mount
+    set:
+      arcadedb.logsDirectory: /var/log/arcadedb
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ARCADEDB_LOG_DIR
+            value: /var/log/arcadedb
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-logs
+            mountPath: /var/log/arcadedb
+
+  - it: config persistence enabled uses the PVC, not an emptyDir
+    set:
+      persistence.config.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-config
+            emptyDir: {}

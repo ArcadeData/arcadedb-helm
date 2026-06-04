@@ -15,6 +15,10 @@ arcadedb:
     - -Darcadedb.server.mode=production
   ## @param arcadedb.extraEnvironment Additional environment variables for the container
   extraEnvironment: []
+  ## @param arcadedb.logsDirectory Directory where the server writes log files.
+  ## Backed by a writable emptyDir and forwarded via the ARCADEDB_LOG_DIR env var
+  ## so logging works under readOnlyRootFilesystem.
+  logsDirectory: "/home/arcadedb/log"
 
   ## @section arcadedb.credentials
   credentials:
