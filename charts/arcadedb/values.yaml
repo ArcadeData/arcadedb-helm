@@ -97,6 +97,10 @@ securityContext:
   runAsUser: 1000
   runAsGroup: 1000
   allowPrivilegeEscalation: false
+  ## readOnlyRootFilesystem hardens the container; the chart provides writable
+  ## emptyDir mounts for logs, /tmp, Raft storage, and (when their PVCs are
+  ## disabled) the database and config directories.
+  readOnlyRootFilesystem: true
   capabilities:
     drop: [ALL]
 
