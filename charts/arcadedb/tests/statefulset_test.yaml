@@ -634,3 +634,46 @@ tests:
           content:
             name: arcadedb-config
             emptyDir: {}
+
+  - it: HA active wires raftStorageDirectory arg and a writable raft emptyDir
+    set:
+      replicaCount: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.raftStorageDirectory=/home/arcadedb/raft
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-raft
+            mountPath: /home/arcadedb/raft
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-raft
+            emptyDir: {}
+
+  - it: single-node has no raft storage wiring
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.raftStorageDirectory=/home/arcadedb/raft
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-raft
+            emptyDir: {}
+
+  - it: raftStorageDirectory override flows through when HA active
+    set:
+      replicaCount: 3
+      arcadedb.ha.raftStorageDirectory: /data/raft
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.raftStorageDirectory=/data/raft
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-raft
+            mountPath: /data/raft

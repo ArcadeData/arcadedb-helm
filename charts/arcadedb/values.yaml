@@ -20,6 +20,13 @@ arcadedb:
   ## so logging works under readOnlyRootFilesystem.
   logsDirectory: "/home/arcadedb/log"
 
+  ## @section arcadedb.ha
+  ha:
+    ## @param arcadedb.ha.raftStorageDirectory Parent directory for the per-node
+    ## raft-storage-<node> folders. Backed by a writable emptyDir; only used when
+    ## HA is active (replicaCount > 1 or autoscaling enabled).
+    raftStorageDirectory: "/home/arcadedb/raft"
+
   ## @section arcadedb.credentials
   credentials:
     rootPassword:
