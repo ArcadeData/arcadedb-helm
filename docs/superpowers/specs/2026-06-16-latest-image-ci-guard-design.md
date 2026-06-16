@@ -31,6 +31,31 @@ Any breakage the guard surfaces is fixed as a follow-up chart change. That is th
 - Changing the default image tag of the chart (stays pinned to appVersion).
 - Blocking PRs on `latest` stability (the guard is its own scheduled workflow).
 - Notifications/issue automation beyond GitHub's native red-workflow signal.
+- Running `helm-unittest` against `latest`. The guard is integration-only by
+  design (see below).
+
+## Relationship to the version-pinned unit tests
+
+`charts/arcadedb/tests/statefulset_test.yaml` pins the chart's `AppVersion` in an
+`equal` assertion (e.g. `value: arcadedata/arcadedb:26.6.1`), because
+`helm-unittest` cannot reference `Chart.AppVersion` inside an assertion value.
+
+This pinning does **not** affect the guard:
+- The guard runs the integration suite only — it never executes `helm-unittest`.
+- The guard's `helm install` passes `--set image.tag=latest`, overriding the
+  AppVersion default, so the pinned literal never collides with `latest`.
+
+The pinning is instead a **release-bump** coupling, unrelated to this guard: it
+must be updated in lockstep with `AppVersion`. See the checklist below.
+
+### Release-bump checklist (when a new ArcadeDB version ships)
+
+1. Bump `version` and `appVersion` in `charts/arcadedb/Chart.yaml`.
+2. Update the pinned image literal(s) in
+   `charts/arcadedb/tests/statefulset_test.yaml` to the new version, or
+   `helm-unittest` will go red.
+3. The `latest` guard keeps watching the next cycle's rolling image — no change
+   needed.
 
 ## Approach
 
