@@ -1,0 +1,74 @@
+name: Integration (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      imageTag:
+        description: "Image tag to test. Empty string defaults to chart appVersion."
+        type: string
+        default: ""
+      pullPolicy:
+        description: "Image pull policy (IfNotPresent for pinned, Always for rolling tags)."
+        type: string
+        default: "IfNotPresent"
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install kind
+        run: |
+          curl -sLo /tmp/kind-linux-amd64 \
+            https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+          curl -sLo /tmp/kind.sha256 \
+            https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64.sha256sum
+          (cd /tmp && sha256sum -c kind.sha256)
+          install -m 0755 /tmp/kind-linux-amd64 /usr/local/bin/kind
+
+      - name: Install kubectl
+        run: |
+          curl -sLo /tmp/kubectl \
+            "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+          curl -sLo /tmp/kubectl.sha256 \
+            "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl.sha256"
+          echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c -
+          install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+
+      - name: Set up Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: v4.1.4
+
+      - name: Log image digest under test
+        if: inputs.imageTag != ''
+        run: |
+          echo "Testing image arcadedata/arcadedb:${{ inputs.imageTag }}"
+          docker buildx imagetools inspect "arcadedata/arcadedb:${{ inputs.imageTag }}" || true
+
+      - name: Create kind cluster
+        run: kind create cluster --wait 60s
+
+      - name: Install chart
+        run: |
+          helm install test-arcadedb charts/arcadedb/ \
+            --set replicaCount=3 \
+            --set persistence.enabled=false \
+            --set arcadedb.defaultDatabases="" \
+            --set image.tag="${{ inputs.imageTag }}" \
+            --set image.pullPolicy="${{ inputs.pullPolicy }}" \
+            --timeout 5m \
+            --wait
+
+      - name: Run integration tests
+        run: make test-integration
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster
