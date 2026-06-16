@@ -1,0 +1,18 @@
+name: CI - Latest Image Guard
+
+# Pre-release guard: exercises the chart against the rolling `latest` ArcadeDB
+# image so regressions in the upcoming release surface before it ships.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC (matches Dependabot cadence)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration-latest:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      imageTag: latest
+      pullPolicy: Always
