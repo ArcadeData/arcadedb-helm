@@ -47,7 +47,7 @@ tests:
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].image"
-          value: arcadedata/arcadedb:26.6.1
+          value: arcadedata/arcadedb:26.7.1
 
   - it: image.tag override wins over AppVersion default
     set:
@@ -64,7 +64,7 @@ tests:
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].image"
-          value: my-registry.example.com/arcadedb-fork:26.6.1
+          value: my-registry.example.com/arcadedb-fork:26.7.1
 
   - it: image.pullPolicy default is IfNotPresent and is overridable
     asserts:
@@ -101,11 +101,11 @@ tests:
           path: "spec.template.spec.containers[0].ports"
           content: { name: rpc, containerPort: 5555, protocol: TCP }
 
-  - it: liveness and readiness probes default to /api/v1/ready on http port
+  - it: liveness probe defaults to /api/v1/health and readiness to /api/v1/ready
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].livenessProbe.httpGet.path"
-          value: /api/v1/ready
+          value: /api/v1/health
       - equal:
           path: "spec.template.spec.containers[0].livenessProbe.httpGet.port"
           value: http

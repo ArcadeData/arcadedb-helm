@@ -165,9 +165,11 @@ resources: {}
 #     memory: 4Gi    # no CPU limit - avoids throttling JVM GC pauses
 
 ## @section livenessProbe
+## Liveness uses the dependency-free /api/v1/health endpoint (no DB I/O,
+## never returns 503). Requires ArcadeDB 26.7.1+.
 livenessProbe:
   httpGet:
-    path: /api/v1/ready
+    path: /api/v1/health
     port: http
 
 ## @section readinessProbe
