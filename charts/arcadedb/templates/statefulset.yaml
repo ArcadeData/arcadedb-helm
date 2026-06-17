@@ -1,3 +1,4 @@
+{{- include "arcadedb.observability.validate" . -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -15,7 +16,7 @@ spec:
       {{- include "arcadedb.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      {{- with (include "arcadedb.podAnnotations" . | fromYaml) }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

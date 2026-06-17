@@ -86,3 +86,75 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.readinessRequiresHA=true"
+
+  - it: scrape pod annotations render when enabled with the prometheus plugin
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      observability.metrics.prometheus.podAnnotations.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/port"]
+          value: "2480"
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/path"]
+          value: /prometheus
+
+  - it: scrape pod annotation port honours service.http.port and custom path
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      service.http.port: 9090
+      observability.metrics.prometheus.podAnnotations.enabled: true
+      observability.metrics.prometheus.podAnnotations.path: /metrics
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/port"]
+          value: "9090"
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/path"]
+          value: /metrics
+
+  - it: scrape pod annotation port can be overridden explicitly
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      observability.metrics.prometheus.podAnnotations.enabled: true
+      observability.metrics.prometheus.podAnnotations.port: 1234
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/port"]
+          value: "1234"
+
+  - it: user podAnnotations are preserved alongside scrape annotations
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      podAnnotations:
+        my-team: data
+      observability.metrics.prometheus.podAnnotations.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["my-team"]
+          value: data
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+
+  - it: no scrape annotations when podAnnotations discovery is disabled
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+
+  - it: fails when scrape annotations enabled without the prometheus plugin
+    set:
+      observability.metrics.prometheus.podAnnotations.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+
+  - it: fails when serviceMonitor enabled without the prometheus plugin
+    set:
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"

@@ -201,3 +201,39 @@ All opt-in; emits nothing when defaults are unchanged.
 - -Darcadedb.server.readinessRequiresHA=true
 {{- end }}
 {{- end -}}
+
+{{/*
+Guard: scrape discovery (ServiceMonitor or pod annotations) needs the
+prometheus plugin so /prometheus is actually served.
+*/}}
+{{- define "arcadedb.observability.validate" -}}
+{{- $p := .Values.observability.metrics.prometheus -}}
+{{- if or $p.serviceMonitor.enabled $p.podAnnotations.enabled -}}
+  {{- $promEnabled := false -}}
+  {{- with .Values.arcadedb.plugins.prometheus -}}
+    {{- if .enabled -}}{{- $promEnabled = true -}}{{- end -}}
+  {{- end -}}
+  {{- if not $promEnabled -}}
+    {{- fail "observability.metrics.prometheus serviceMonitor/podAnnotations require arcadedb.plugins.prometheus.enabled=true (the /prometheus endpoint must be served)" -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Merge user-supplied podAnnotations with computed prometheus.io/* scrape
+annotations. Returns YAML (possibly empty).
+*/}}
+{{- define "arcadedb.podAnnotations" -}}
+{{- $annotations := deepCopy (default dict .Values.podAnnotations) -}}
+{{- $pa := .Values.observability.metrics.prometheus.podAnnotations -}}
+{{- if $pa.enabled -}}
+  {{- $port := int .Values.service.http.port -}}
+  {{- if $pa.port -}}{{- $port = int $pa.port -}}{{- end -}}
+  {{- $_ := set $annotations "prometheus.io/scrape" "true" -}}
+  {{- $_ := set $annotations "prometheus.io/port" (printf "%d" $port) -}}
+  {{- $_ := set $annotations "prometheus.io/path" (default "/prometheus" $pa.path) -}}
+{{- end -}}
+{{- if $annotations -}}
+{{- toYaml $annotations -}}
+{{- end -}}
+{{- end -}}
