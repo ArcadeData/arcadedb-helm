@@ -1,0 +1,100 @@
+suite: ServiceMonitor
+templates:
+  - servicemonitor.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  - it: is not rendered by default
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: renders when enabled with the prometheus plugin
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+    asserts:
+      - hasDocuments: { count: 1 }
+      - isKind: { of: ServiceMonitor }
+      - equal: { path: metadata.name, value: test-arcadedb }
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/name"]
+          value: arcadedb
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: http
+      - equal: { path: "spec.endpoints[0].port", value: http }
+      - equal: { path: "spec.endpoints[0].path", value: /prometheus }
+      - equal: { path: "spec.endpoints[0].interval", value: 30s }
+
+  - it: scrapeTimeout omitted by default; annotations and relabelings pass through
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+      observability.metrics.prometheus.serviceMonitor.annotations:
+        team: data
+      observability.metrics.prometheus.serviceMonitor.relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+    asserts:
+      - notExists:
+          path: spec.endpoints[0].scrapeTimeout
+      - equal:
+          path: metadata.annotations.team
+          value: data
+      - equal:
+          path: spec.endpoints[0].relabelings[0].targetLabel
+          value: pod
+
+  - it: honours interval, scrapeTimeout, path, and extra labels
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+      observability.metrics.prometheus.serviceMonitor.interval: 15s
+      observability.metrics.prometheus.serviceMonitor.scrapeTimeout: 10s
+      observability.metrics.prometheus.serviceMonitor.path: /metrics
+      observability.metrics.prometheus.serviceMonitor.labels:
+        release: kube-prometheus-stack
+    asserts:
+      - equal: { path: "spec.endpoints[0].interval", value: 15s }
+      - equal: { path: "spec.endpoints[0].scrapeTimeout", value: 10s }
+      - equal: { path: "spec.endpoints[0].path", value: /metrics }
+      - equal:
+          path: metadata.labels.release
+          value: kube-prometheus-stack
+
+  - it: renders basicAuth referencing the supplied secret
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+      observability.metrics.prometheus.serviceMonitor.basicAuth.enabled: true
+      observability.metrics.prometheus.serviceMonitor.basicAuth.secretName: scrape-creds
+    asserts:
+      - equal:
+          path: spec.endpoints[0].basicAuth.username.name
+          value: scrape-creds
+      - equal:
+          path: spec.endpoints[0].basicAuth.username.key
+          value: username
+      - equal:
+          path: spec.endpoints[0].basicAuth.password.name
+          value: scrape-creds
+      - equal:
+          path: spec.endpoints[0].basicAuth.password.key
+          value: password
+
+  - it: fails when ServiceMonitor enabled without the prometheus plugin
+    set:
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+
+  - it: fails when basicAuth enabled without a secretName
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+      observability.metrics.prometheus.serviceMonitor.basicAuth.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires basicAuth.secretName"

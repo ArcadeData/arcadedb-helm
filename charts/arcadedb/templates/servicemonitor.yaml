@@ -1,0 +1,49 @@
+{{- if .Values.observability.metrics.prometheus.serviceMonitor.enabled }}
+{{- include "arcadedb.observability.validate" . -}}
+{{- $sm := .Values.observability.metrics.prometheus.serviceMonitor -}}
+{{- if and $sm.basicAuth.enabled (not $sm.basicAuth.secretName) -}}
+{{- fail "serviceMonitor.basicAuth.enabled requires basicAuth.secretName (a secret with username + password keys)" -}}
+{{- end -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "arcadedb.fullname" . }}
+  labels:
+    {{- include "arcadedb.labels" . | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $sm.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "arcadedb.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: http
+  endpoints:
+    - port: http
+      path: {{ $sm.path }}
+      interval: {{ $sm.interval }}
+      {{- with $sm.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+      {{- if $sm.basicAuth.enabled }}
+      basicAuth:
+        username:
+          name: {{ $sm.basicAuth.secretName }}
+          key: {{ $sm.basicAuth.usernameKey }}
+        password:
+          name: {{ $sm.basicAuth.secretName }}
+          key: {{ $sm.basicAuth.passwordKey }}
+      {{- end }}
+      {{- with $sm.relabelings }}
+      relabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sm.metricRelabelings }}
+      metricRelabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
