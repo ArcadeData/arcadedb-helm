@@ -144,6 +144,11 @@ Create a comma separated list of plugins to be enabled in arcadedb
       {{- $params = append $params (printf "-Darcadedb.redis.port=%d" (int $config.port)) -}}
     {{- else if eq $plugin "prometheus" -}}
       {{- $plugins = append $plugins "Prometheus:com.arcadedb.metrics.prometheus.PrometheusMetricsPlugin" -}}
+      {{- with $.Values.arcadedb.plugins.prometheus -}}
+        {{- if hasKey . "requireAuthentication" -}}
+          {{- $params = append $params (printf "-Darcadedb.serverMetrics.prometheus.requireAuthentication=%v" .requireAuthentication) -}}
+        {{- end -}}
+      {{- end -}}
     {{- else -}}
       {{- $plugins = append $plugins (printf "%s:%s" $plugin $config.class) -}}
     {{- end -}}

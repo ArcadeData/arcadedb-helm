@@ -56,6 +56,9 @@ arcadedb:
     #   port: 6379
     # prometheus:
     #   enabled: false
+    #   # Set false to allow unauthenticated scraping of /prometheus (needed for
+    #   # ServiceMonitor / annotation-based discovery without basic auth).
+    #   requireAuthentication: true
     ## Custom plugin example:
     # myPlugin:
     #   enabled: true
