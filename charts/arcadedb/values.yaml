@@ -268,3 +268,71 @@ networkPolicy:
   ## When enabled: HTTP (2480) is open to all cluster pods; Raft gRPC (2434) is restricted
   ## to ArcadeDB pods only. Recommended for production multi-tenant clusters.
   enabled: false
+
+## @section observability
+## Opt-in, behavior-preserving observability (ArcadeDB 26.7.1+).
+## Every knob below defaults off; existing deployments are unchanged.
+observability:
+  ## @section observability.metrics
+  metrics:
+    prometheus:
+      ## Prometheus Operator ServiceMonitor. Requires the prometheus plugin
+      ## (arcadedb.plugins.prometheus.enabled=true) so /prometheus is served.
+      serviceMonitor:
+        ## @param observability.metrics.prometheus.serviceMonitor.enabled Create a ServiceMonitor CRD
+        enabled: false
+        ## @param observability.metrics.prometheus.serviceMonitor.interval Scrape interval
+        interval: 30s
+        ## @param observability.metrics.prometheus.serviceMonitor.scrapeTimeout Scrape timeout (empty = Prometheus default)
+        scrapeTimeout: ""
+        ## @param observability.metrics.prometheus.serviceMonitor.path Metrics path
+        path: /prometheus
+        ## @param observability.metrics.prometheus.serviceMonitor.labels Extra labels (e.g. release: kube-prometheus-stack)
+        labels: {}
+        ## @param observability.metrics.prometheus.serviceMonitor.annotations Extra annotations
+        annotations: {}
+        ## @param observability.metrics.prometheus.serviceMonitor.relabelings Prometheus relabelings
+        relabelings: []
+        ## @param observability.metrics.prometheus.serviceMonitor.metricRelabelings Prometheus metric relabelings
+        metricRelabelings: []
+        basicAuth:
+          ## @param observability.metrics.prometheus.serviceMonitor.basicAuth.enabled Scrape with basic auth
+          enabled: false
+          ## @param observability.metrics.prometheus.serviceMonitor.basicAuth.secretName Secret holding scrape credentials (username + password keys)
+          secretName: ""
+          ## @param observability.metrics.prometheus.serviceMonitor.basicAuth.usernameKey Key in the secret holding the username
+          usernameKey: username
+          ## @param observability.metrics.prometheus.serviceMonitor.basicAuth.passwordKey Key in the secret holding the password
+          passwordKey: password
+      ## Annotation-based discovery (classic Prometheus, no Operator).
+      podAnnotations:
+        ## @param observability.metrics.prometheus.podAnnotations.enabled Add prometheus.io/* scrape annotations to pods
+        enabled: false
+        ## @param observability.metrics.prometheus.podAnnotations.path Scrape path annotation value
+        path: /prometheus
+        ## @param observability.metrics.prometheus.podAnnotations.port Scrape port (empty = service.http.port)
+        port: ""
+    ## Push metrics to an OpenTelemetry collector alongside /prometheus.
+    otlp:
+      ## @param observability.metrics.otlp.enabled Enable the OTLP metrics registry
+      enabled: false
+      ## @param observability.metrics.otlp.endpoint OTLP/gRPC metrics endpoint
+      endpoint: http://localhost:4317
+  ## @section observability.tracing
+  tracing:
+    ## @param observability.tracing.enabled Enable distributed tracing (plugin ships in the standard image)
+    enabled: false
+    ## @param observability.tracing.endpoint OTLP/gRPC trace endpoint
+    endpoint: http://localhost:4317
+    ## @param observability.tracing.samplingRate Parent-based sampling ratio [0.0, 1.0]
+    samplingRate: 0.0
+  ## @section observability.logging
+  logging:
+    ## @param observability.logging.format Log format: text or json
+    format: text
+    ## @param observability.logging.includeTrace Append [traceId=…] to text logs while a trace is active
+    includeTrace: false
+  ## @section observability.health
+  health:
+    ## @param observability.health.readinessRequiresHA /api/v1/ready waits for Raft join on HA clusters
+    readinessRequiresHA: false

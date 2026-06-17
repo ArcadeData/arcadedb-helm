@@ -170,3 +170,29 @@ Create service configuration for the enabled plugins
     {{- end -}}
   {{- end -}}
 {{- end -}}
+
+{{/*
+Observability -D JVM args (logging, OTLP metrics, tracing, readiness).
+All opt-in; emits nothing when defaults are unchanged.
+*/}}
+{{- define "arcadedb.observability.args" -}}
+{{- $o := .Values.observability -}}
+{{- if eq $o.logging.format "json" }}
+- -Darcadedb.server.logFormat=json
+{{- end }}
+{{- if $o.logging.includeTrace }}
+- -Darcadedb.server.logIncludeTrace=true
+{{- end }}
+{{- if $o.metrics.otlp.enabled }}
+- -Darcadedb.serverMetrics.otlp.enabled=true
+- -Darcadedb.serverMetrics.otlp.endpoint={{ $o.metrics.otlp.endpoint }}
+{{- end }}
+{{- if $o.tracing.enabled }}
+- -Darcadedb.serverMetrics.tracing.enabled=true
+- -Darcadedb.serverMetrics.tracing.endpoint={{ $o.tracing.endpoint }}
+- -Darcadedb.serverMetrics.tracing.samplingRate={{ $o.tracing.samplingRate }}
+{{- end }}
+{{- if $o.health.readinessRequiresHA }}
+- -Darcadedb.server.readinessRequiresHA=true
+{{- end }}
+{{- end -}}

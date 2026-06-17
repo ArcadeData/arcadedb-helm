@@ -68,6 +68,7 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
             {{- include "arcadedb.plugin.parameters" . | nindent 12 }}
+            {{- include "arcadedb.observability.args" . | nindent 12 }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

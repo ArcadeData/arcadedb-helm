@@ -1,0 +1,88 @@
+suite: Observability args (asserted via StatefulSet)
+templates:
+  - statefulset.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  - it: emits no observability args by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.logFormat=json"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.otlp.enabled=true"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.tracing.enabled=true"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.readinessRequiresHA=true"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.logIncludeTrace=true"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.otlp.endpoint=http://localhost:4317"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.tracing.samplingRate=0.0"
+
+  - it: logging.format=json emits the logFormat arg
+    set:
+      observability.logging.format: json
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.logFormat=json"
+
+  - it: text logging (default) emits no logFormat arg
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.logFormat=json"
+
+  - it: logging.includeTrace=true emits the logIncludeTrace arg
+    set:
+      observability.logging.includeTrace: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.logIncludeTrace=true"
+
+  - it: otlp metrics enabled emits enable + endpoint args
+    set:
+      observability.metrics.otlp.enabled: true
+      observability.metrics.otlp.endpoint: http://otel-collector:4317
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.otlp.enabled=true"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.otlp.endpoint=http://otel-collector:4317"
+
+  - it: tracing enabled emits enable + endpoint + samplingRate args
+    set:
+      observability.tracing.enabled: true
+      observability.tracing.endpoint: http://otel-collector:4317
+      observability.tracing.samplingRate: 0.1
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.tracing.enabled=true"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.tracing.endpoint=http://otel-collector:4317"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.tracing.samplingRate=0.1"
+
+  - it: readinessRequiresHA emits the arg
+    set:
+      observability.health.readinessRequiresHA: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.readinessRequiresHA=true"
