@@ -120,7 +120,7 @@ The command removes all the Kubernetes components associated with the chart and 
 
 | Name                         | Description | Value           |
 |------------------------------|-------------|-----------------|
-| `livenessProbe.httpGet.path` |             | `/api/v1/ready` |
+| `livenessProbe.httpGet.path` |             | `/api/v1/health` |
 | `livenessProbe.httpGet.port` |             | `http`          |
 
 ### This is to setup the liveness and readiness probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
@@ -171,6 +171,53 @@ The command removes all the Kubernetes components associated with the chart and 
 |--------------------------------------------------------------------------------------|---------------------------------------------------|-------|
 | `affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].weight` |                                                   | `100` |
 | `extraManifests`                                                                     | - Include any amount of extra arbitrary manifests | `{}`  |
+
+### observability
+
+Opt-in, behavior-preserving observability (ArcadeDB 26.7.1+). Every knob below defaults off; existing deployments are unchanged.
+
+### observability.metrics
+
+| Name                                                                  | Description                                              | Value                    |
+|-----------------------------------------------------------------------|----------------------------------------------------------|--------------------------|
+| `observability.metrics.prometheus.serviceMonitor.enabled`             | Create a Prometheus Operator ServiceMonitor              | `false`                  |
+| `observability.metrics.prometheus.serviceMonitor.interval`            | Scrape interval                                          | `30s`                    |
+| `observability.metrics.prometheus.serviceMonitor.scrapeTimeout`       | Scrape timeout (empty = Prometheus default)             | `""`                     |
+| `observability.metrics.prometheus.serviceMonitor.path`                | Metrics path                                            | `/prometheus`            |
+| `observability.metrics.prometheus.serviceMonitor.labels`              | Extra labels (e.g. release: kube-prometheus-stack)      | `{}`                     |
+| `observability.metrics.prometheus.serviceMonitor.annotations`         | Extra annotations                                       | `{}`                     |
+| `observability.metrics.prometheus.serviceMonitor.relabelings`         | Prometheus relabelings                                  | `[]`                     |
+| `observability.metrics.prometheus.serviceMonitor.metricRelabelings`   | Prometheus metric relabelings                           | `[]`                     |
+| `observability.metrics.prometheus.serviceMonitor.basicAuth.enabled`   | Scrape with basic auth                                  | `false`                  |
+| `observability.metrics.prometheus.serviceMonitor.basicAuth.secretName` | Secret with scrape credentials (username + password keys) | `""`                  |
+| `observability.metrics.prometheus.serviceMonitor.basicAuth.usernameKey` | Secret key holding the username                        | `username`               |
+| `observability.metrics.prometheus.serviceMonitor.basicAuth.passwordKey` | Secret key holding the password                        | `password`               |
+| `observability.metrics.prometheus.podAnnotations.enabled`             | Add prometheus.io/* scrape annotations to pods          | `false`                  |
+| `observability.metrics.prometheus.podAnnotations.path`                | Scrape path annotation value                            | `/prometheus`            |
+| `observability.metrics.prometheus.podAnnotations.port`                | Scrape port (empty = service.http.port)                 | `""`                     |
+| `observability.metrics.otlp.enabled`                                  | Enable the OTLP metrics registry                        | `false`                  |
+| `observability.metrics.otlp.endpoint`                                 | OTLP/gRPC metrics endpoint                              | `http://localhost:4317`  |
+
+### observability.tracing
+
+| Name                              | Description                          | Value                   |
+|-----------------------------------|--------------------------------------|-------------------------|
+| `observability.tracing.enabled`      | Enable distributed tracing           | `false`                 |
+| `observability.tracing.endpoint`     | OTLP/gRPC trace endpoint             | `http://localhost:4317` |
+| `observability.tracing.samplingRate` | Parent-based sampling ratio [0.0, 1.0] | `0.0`                 |
+
+### observability.logging
+
+| Name                                | Description                                              | Value  |
+|-------------------------------------|----------------------------------------------------------|--------|
+| `observability.logging.format`       | Log format: text or json                                | `text` |
+| `observability.logging.includeTrace` | Append [traceId=…] to text logs while a trace is active | `false` |
+
+### observability.health
+
+| Name                                       | Description                                       | Value   |
+|--------------------------------------------|---------------------------------------------------|---------|
+| `observability.health.readinessRequiresHA` | /api/v1/ready waits for Raft join on HA clusters | `false` |
 
 Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. For example:
 
