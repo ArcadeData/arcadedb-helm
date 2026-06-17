@@ -1,2 +1,5 @@
 .cr-release-packages/
 .helm/
+.claude/settings.local.json
+.debug/
+.idea/
