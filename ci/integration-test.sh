@@ -41,6 +41,18 @@ api() {               # api <local-port> <method> <path> [body]
   fi
 }
 
+assert_health_204() {   # assert_health_204 <local-port>
+  local port=$1 code
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+    "http://localhost:${port}/api/v1/health" || true)
+  if [[ "$code" != "204" ]]; then
+    echo "ERROR: /api/v1/health returned ${code}, expected 204"
+    return 1
+  fi
+  echo "    /api/v1/health -> 204 (unauthenticated liveness OK)"
+  return 0
+}
+
 cleanup() {
   [[ -n "${PF_PID:-}" ]] && { kill "$PF_PID" 2>/dev/null || true; }
 }
@@ -131,21 +143,29 @@ PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
-echo "==> [1/6] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
+echo "==> [1/7] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
 echo "    All 3 pods Ready."
 
-# ── phase 2: raft formation ───────────────────────────────────────────────────
+# ── phase 2: liveness health probe ────────────────────────────────────────────
 
-echo "==> [2/6] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+echo "==> [2/7] Asserting /api/v1/health liveness endpoint..."
+PF_PID=$(pf_start 0 "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to pod-0 failed"; exit 1; }
+assert_health_204 "$HTTP_PORT" || exit 1
+pf_stop "$PF_PID"
+
+# ── phase 3: raft formation ───────────────────────────────────────────────────
+
+echo "==> [3/7] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
 assert_quorum_n 3 || exit 1
 
-# ── phase 3: write ────────────────────────────────────────────────────────────
+# ── phase 4: write ────────────────────────────────────────────────────────────
 
 # LEADER_ORDINAL is set by assert_quorum_n above.
 
-echo "==> [3/6] Writing test data via leader pod-${LEADER_ORDINAL}..."
+echo "==> [4/7] Writing test data via leader pod-${LEADER_ORDINAL}..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
 
@@ -163,9 +183,9 @@ api "$HTTP_PORT" POST /api/v1/command/integration-test \
 
 echo "    Write complete."
 
-# ── phase 4: read and assert ──────────────────────────────────────────────────
+# ── phase 5: read and assert ──────────────────────────────────────────────────
 
-echo "==> [4/6] Reading back test data..."
+echo "==> [5/7] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
   | jq -r '.result[0].name // empty') || {
@@ -182,9 +202,9 @@ fi
 
 echo "    Got: '${RESULT}'"
 
-# ── phase 5: STATUS column ────────────────────────────────────────────────────
+# ── phase 6: STATUS column ────────────────────────────────────────────────────
 
-echo "==> [5/6] Asserting STATUS=HEALTHY for all peers..."
+echo "==> [6/7] Asserting STATUS=HEALTHY for all peers..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -192,9 +212,9 @@ cluster_status_assert_healthy "$HTTP_PORT" || exit 1
 
 pf_stop "$PF_PID"
 
-# ── phase 6: leadership transfer ──────────────────────────────────────────────
+# ── phase 7: leadership transfer ──────────────────────────────────────────────
 
-echo "==> [6/6] Transferring Raft leadership..."
+echo "==> [7/7] Transferring Raft leadership..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
