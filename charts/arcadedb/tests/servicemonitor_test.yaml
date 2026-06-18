@@ -9,6 +9,12 @@ tests:
     asserts:
       - hasDocuments: { count: 0 }
 
+  - it: renders nothing without panic when observability is explicitly null
+    set:
+      observability: null
+    asserts:
+      - hasDocuments: { count: 0 }
+
   - it: renders when enabled with the prometheus plugin
     set:
       arcadedb.plugins.prometheus.enabled: true

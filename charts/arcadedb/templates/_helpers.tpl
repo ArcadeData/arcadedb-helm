@@ -181,23 +181,27 @@ Observability -D JVM args (logging, OTLP metrics, tracing, readiness).
 All opt-in; emits nothing when defaults are unchanged.
 */}}
 {{- define "arcadedb.observability.args" -}}
-{{- $o := .Values.observability -}}
-{{- if eq $o.logging.format "json" }}
+{{- $o := .Values.observability | default dict -}}
+{{- $logging := $o.logging | default dict -}}
+{{- $otlp := (($o.metrics | default dict).otlp) | default dict -}}
+{{- $tracing := $o.tracing | default dict -}}
+{{- $health := $o.health | default dict -}}
+{{- if eq $logging.format "json" }}
 - -Darcadedb.server.logFormat=json
 {{- end }}
-{{- if $o.logging.includeTrace }}
+{{- if $logging.includeTrace }}
 - -Darcadedb.server.logIncludeTrace=true
 {{- end }}
-{{- if $o.metrics.otlp.enabled }}
+{{- if $otlp.enabled }}
 - -Darcadedb.serverMetrics.otlp.enabled=true
-- -Darcadedb.serverMetrics.otlp.endpoint={{ $o.metrics.otlp.endpoint }}
+- -Darcadedb.serverMetrics.otlp.endpoint={{ $otlp.endpoint }}
 {{- end }}
-{{- if $o.tracing.enabled }}
+{{- if $tracing.enabled }}
 - -Darcadedb.serverMetrics.tracing.enabled=true
-- -Darcadedb.serverMetrics.tracing.endpoint={{ $o.tracing.endpoint }}
-- -Darcadedb.serverMetrics.tracing.samplingRate={{ $o.tracing.samplingRate }}
+- -Darcadedb.serverMetrics.tracing.endpoint={{ $tracing.endpoint }}
+- -Darcadedb.serverMetrics.tracing.samplingRate={{ $tracing.samplingRate }}
 {{- end }}
-{{- if $o.health.readinessRequiresHA }}
+{{- if $health.readinessRequiresHA }}
 - -Darcadedb.server.readinessRequiresHA=true
 {{- end }}
 {{- end -}}
@@ -207,8 +211,10 @@ Guard: scrape discovery (ServiceMonitor or pod annotations) needs the
 prometheus plugin so /prometheus is actually served.
 */}}
 {{- define "arcadedb.observability.validate" -}}
-{{- $p := .Values.observability.metrics.prometheus -}}
-{{- if or $p.serviceMonitor.enabled $p.podAnnotations.enabled -}}
+{{- $p := (((.Values.observability | default dict).metrics | default dict).prometheus) | default dict -}}
+{{- $serviceMonitor := $p.serviceMonitor | default dict -}}
+{{- $podAnnotations := $p.podAnnotations | default dict -}}
+{{- if or $serviceMonitor.enabled $podAnnotations.enabled -}}
   {{- $promEnabled := false -}}
   {{- with .Values.arcadedb.plugins.prometheus -}}
     {{- if .enabled -}}{{- $promEnabled = true -}}{{- end -}}
@@ -225,7 +231,7 @@ annotations. Returns YAML (possibly empty).
 */}}
 {{- define "arcadedb.podAnnotations" -}}
 {{- $annotations := deepCopy (default dict .Values.podAnnotations) -}}
-{{- $pa := .Values.observability.metrics.prometheus.podAnnotations -}}
+{{- $pa := (((((.Values.observability | default dict).metrics | default dict).prometheus) | default dict).podAnnotations) | default dict -}}
 {{- if $pa.enabled -}}
   {{- $port := int .Values.service.http.port -}}
   {{- if $pa.port -}}{{- $port = int $pa.port -}}{{- end -}}

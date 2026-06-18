@@ -1,7 +1,8 @@
-{{- if .Values.observability.metrics.prometheus.serviceMonitor.enabled }}
+{{- $sm := (((((.Values.observability | default dict).metrics | default dict).prometheus) | default dict).serviceMonitor) | default dict -}}
+{{- if $sm.enabled }}
 {{- include "arcadedb.observability.validate" . -}}
-{{- $sm := .Values.observability.metrics.prometheus.serviceMonitor -}}
-{{- if and $sm.basicAuth.enabled (not $sm.basicAuth.secretName) -}}
+{{- $basicAuth := $sm.basicAuth | default dict -}}
+{{- if and $basicAuth.enabled (not $basicAuth.secretName) -}}
 {{- fail "serviceMonitor.basicAuth.enabled requires basicAuth.secretName (a secret with username + password keys)" -}}
 {{- end -}}
 apiVersion: monitoring.coreos.com/v1
@@ -29,14 +30,14 @@ spec:
       {{- with $sm.scrapeTimeout }}
       scrapeTimeout: {{ . }}
       {{- end }}
-      {{- if $sm.basicAuth.enabled }}
+      {{- if $basicAuth.enabled }}
       basicAuth:
         username:
-          name: {{ $sm.basicAuth.secretName }}
-          key: {{ $sm.basicAuth.usernameKey }}
+          name: {{ $basicAuth.secretName }}
+          key: {{ $basicAuth.usernameKey }}
         password:
-          name: {{ $sm.basicAuth.secretName }}
-          key: {{ $sm.basicAuth.passwordKey }}
+          name: {{ $basicAuth.secretName }}
+          key: {{ $basicAuth.passwordKey }}
       {{- end }}
       {{- with $sm.relabelings }}
       relabelings:

@@ -87,6 +87,31 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.readinessRequiresHA=true"
 
+  - it: renders without panic when observability is explicitly null
+    set:
+      observability: null
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.logFormat=json"
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /api/v1/health
+
+  - it: renders without panic when observability sub-maps are explicitly null
+    set:
+      observability.logging: null
+      observability.metrics: null
+      observability.tracing: null
+      observability.health: null
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.readinessRequiresHA=true"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.otlp.enabled=true"
+
   - it: scrape pod annotations render when enabled with the prometheus plugin
     set:
       arcadedb.plugins.prometheus.enabled: true
