@@ -144,6 +144,11 @@ Create a comma separated list of plugins to be enabled in arcadedb
       {{- $params = append $params (printf "-Darcadedb.redis.port=%d" (int $config.port)) -}}
     {{- else if eq $plugin "prometheus" -}}
       {{- $plugins = append $plugins "Prometheus:com.arcadedb.metrics.prometheus.PrometheusMetricsPlugin" -}}
+      {{- with $.Values.arcadedb.plugins.prometheus -}}
+        {{- if hasKey . "requireAuthentication" -}}
+          {{- $params = append $params (printf "-Darcadedb.serverMetrics.prometheus.requireAuthentication=%v" .requireAuthentication) -}}
+        {{- end -}}
+      {{- end -}}
     {{- else -}}
       {{- $plugins = append $plugins (printf "%s:%s" $plugin $config.class) -}}
     {{- end -}}
@@ -169,4 +174,72 @@ Create service configuration for the enabled plugins
   name: {{ $plugin }}-port
     {{- end -}}
   {{- end -}}
+{{- end -}}
+
+{{/*
+Observability -D JVM args (logging, OTLP metrics, tracing, readiness).
+All opt-in; emits nothing when defaults are unchanged.
+*/}}
+{{- define "arcadedb.observability.args" -}}
+{{- $o := .Values.observability | default dict -}}
+{{- $logging := $o.logging | default dict -}}
+{{- $otlp := (($o.metrics | default dict).otlp) | default dict -}}
+{{- $tracing := $o.tracing | default dict -}}
+{{- $health := $o.health | default dict -}}
+{{- if eq $logging.format "json" }}
+- -Darcadedb.server.logFormat=json
+{{- end }}
+{{- if $logging.includeTrace }}
+- -Darcadedb.server.logIncludeTrace=true
+{{- end }}
+{{- if $otlp.enabled }}
+- -Darcadedb.serverMetrics.otlp.enabled=true
+- -Darcadedb.serverMetrics.otlp.endpoint={{ $otlp.endpoint }}
+{{- end }}
+{{- if $tracing.enabled }}
+- -Darcadedb.serverMetrics.tracing.enabled=true
+- -Darcadedb.serverMetrics.tracing.endpoint={{ $tracing.endpoint }}
+- -Darcadedb.serverMetrics.tracing.samplingRate={{ $tracing.samplingRate }}
+{{- end }}
+{{- if $health.readinessRequiresHA }}
+- -Darcadedb.server.readinessRequiresHA=true
+{{- end }}
+{{- end -}}
+
+{{/*
+Guard: scrape discovery (ServiceMonitor or pod annotations) needs the
+prometheus plugin so /prometheus is actually served.
+*/}}
+{{- define "arcadedb.observability.validate" -}}
+{{- $p := (((.Values.observability | default dict).metrics | default dict).prometheus) | default dict -}}
+{{- $serviceMonitor := $p.serviceMonitor | default dict -}}
+{{- $podAnnotations := $p.podAnnotations | default dict -}}
+{{- if or $serviceMonitor.enabled $podAnnotations.enabled -}}
+  {{- $promEnabled := false -}}
+  {{- with .Values.arcadedb.plugins.prometheus -}}
+    {{- if .enabled -}}{{- $promEnabled = true -}}{{- end -}}
+  {{- end -}}
+  {{- if not $promEnabled -}}
+    {{- fail "observability.metrics.prometheus serviceMonitor/podAnnotations require arcadedb.plugins.prometheus.enabled=true (the /prometheus endpoint must be served)" -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Merge user-supplied podAnnotations with computed prometheus.io/* scrape
+annotations. Returns YAML (possibly empty).
+*/}}
+{{- define "arcadedb.podAnnotations" -}}
+{{- $annotations := deepCopy (default dict .Values.podAnnotations) -}}
+{{- $pa := (((((.Values.observability | default dict).metrics | default dict).prometheus) | default dict).podAnnotations) | default dict -}}
+{{- if $pa.enabled -}}
+  {{- $port := int .Values.service.http.port -}}
+  {{- if $pa.port -}}{{- $port = int $pa.port -}}{{- end -}}
+  {{- $_ := set $annotations "prometheus.io/scrape" "true" -}}
+  {{- $_ := set $annotations "prometheus.io/port" (printf "%d" $port) -}}
+  {{- $_ := set $annotations "prometheus.io/path" (default "/prometheus" $pa.path) -}}
+{{- end -}}
+{{- if $annotations -}}
+{{- toYaml $annotations -}}
+{{- end -}}
 {{- end -}}

@@ -101,3 +101,32 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.plugins=myplugin:com.example.MyPlugin"
+
+  - it: prometheus plugin emits requireAuthentication=false when set
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      arcadedb.plugins.prometheus.requireAuthentication: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.prometheus.requireAuthentication=false"
+
+  - it: prometheus plugin omits requireAuthentication arg when not set
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.prometheus.requireAuthentication=false"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.prometheus.requireAuthentication=true"
+
+  - it: prometheus plugin emits requireAuthentication=true when explicitly set
+    set:
+      arcadedb.plugins.prometheus.enabled: true
+      arcadedb.plugins.prometheus.requireAuthentication: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.serverMetrics.prometheus.requireAuthentication=true"

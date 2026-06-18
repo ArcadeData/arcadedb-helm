@@ -25,6 +25,16 @@ tests:
           path: spec.selector["app.kubernetes.io/instance"]
           value: test
 
+  - it: only the http Service carries the component=http label
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: http
+        documentIndex: 0
+      - notExists:
+          path: metadata.labels["app.kubernetes.io/component"]
+        documentIndex: 1
+
   - it: client service type can be overridden to LoadBalancer
     set:
       service.http.type: LoadBalancer
