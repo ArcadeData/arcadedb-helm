@@ -40,3 +40,12 @@ jobs:
 
   integration:
     uses: ./.github/workflows/integration-reusable.yml
+    # TEMPORARY (revert at 26.7.1 release): the chart's appVersion is bumped to
+    # 26.7.1 ahead of the image publish, so the default image.tag=appVersion
+    # cannot be pulled yet. Test against the rolling `latest` tag (== 26.7.1
+    # content) until arcadedata/arcadedb:26.7.1 is published, then delete this
+    # `with:` block so the PR integration job tests the pinned appVersion again
+    # (see commit f3db108 and PR #12).
+    with:
+      imageTag: latest
+      pullPolicy: Always
