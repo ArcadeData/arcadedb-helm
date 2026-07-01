@@ -21,6 +21,9 @@ tests:
           content: "-Darcadedb.server.readinessRequiresHA=true"
       - notContains:
           path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.readinessHAMaxLag=100"
+      - notContains:
+          path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.logIncludeTrace=true"
       - notContains:
           path: spec.template.spec.containers[0].command
@@ -79,13 +82,33 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.serverMetrics.tracing.samplingRate=0.1"
 
-  - it: readinessRequiresHA emits the arg
+  - it: readinessRequiresHA emits the arg plus the default readinessHAMaxLag
     set:
       observability.health.readinessRequiresHA: true
     asserts:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.readinessRequiresHA=true"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.readinessHAMaxLag=100"
+
+  - it: readinessHAMaxLag can be overridden
+    set:
+      observability.health.readinessRequiresHA: true
+      observability.health.readinessHAMaxLag: 25
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.readinessHAMaxLag=25"
+
+  - it: readinessHAMaxLag is not emitted when readinessRequiresHA is false
+    set:
+      observability.health.readinessHAMaxLag: 25
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.readinessHAMaxLag=25"
 
   - it: renders without panic when observability is explicitly null
     set:

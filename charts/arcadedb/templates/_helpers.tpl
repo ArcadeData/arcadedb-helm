@@ -203,6 +203,7 @@ All opt-in; emits nothing when defaults are unchanged.
 {{- end }}
 {{- if $health.readinessRequiresHA }}
 - -Darcadedb.server.readinessRequiresHA=true
+- -Darcadedb.server.readinessHAMaxLag={{ $health.readinessHAMaxLag }}
 {{- end }}
 {{- end -}}
 

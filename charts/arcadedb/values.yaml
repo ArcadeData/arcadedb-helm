@@ -341,3 +341,5 @@ observability:
   health:
     ## @param observability.health.readinessRequiresHA /api/v1/ready waits for Raft join on HA clusters
     readinessRequiresHA: false
+    ## @param observability.health.readinessHAMaxLag Max Raft log entries a follower may lag behind commit index and still report Ready (requires readinessRequiresHA)
+    readinessHAMaxLag: 100
