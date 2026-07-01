@@ -218,6 +218,7 @@ Opt-in, behavior-preserving observability (ArcadeDB 26.7.1+). Every knob below d
 | Name                                       | Description                                       | Value   |
 |--------------------------------------------|---------------------------------------------------|---------|
 | `observability.health.readinessRequiresHA` | /api/v1/ready waits for Raft join on HA clusters | `false` |
+| `observability.health.readinessHAMaxLag`   | Max Raft log entries a follower may lag behind commit index and still report Ready (requires readinessRequiresHA) | `100` |
 
 Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. For example:
 
