@@ -4,6 +4,18 @@ entries:
   - annotations:
       artifacthub.io/repositoryID: fb85acb7-fb5b-4572-b44b-374a2b52658d
     apiVersion: v2
+    appVersion: 26.7.1
+    created: "2026-07-02T07:05:32.9363488Z"
+    description: 'A Helm chart for ArcadeDB '
+    digest: 0261df7e338ab556559909db1e0c6629bf1d713907d76ce603026ca6ff7dd290
+    name: arcadedb
+    type: application
+    urls:
+    - https://github.com/ArcadeData/arcadedb-helm/releases/download/arcadedb-26.7.1/arcadedb-26.7.1.tgz
+    version: 26.7.1
+  - annotations:
+      artifacthub.io/repositoryID: fb85acb7-fb5b-4572-b44b-374a2b52658d
+    apiVersion: v2
     appVersion: 26.6.1
     created: "2026-06-04T09:35:19.115654733Z"
     description: 'A Helm chart for ArcadeDB '
@@ -37,4 +49,4 @@ entries:
     urls:
     - https://github.com/ArcadeData/arcadedb-helm/releases/download/arcadedb-26.4.2/arcadedb-26.4.2.tgz
     version: 26.4.2
-generated: "2026-06-04T09:35:19.11566607Z"
+generated: "2026-07-02T07:05:32.936366273Z"
