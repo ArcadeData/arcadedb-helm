@@ -44,3 +44,24 @@ existing missing-`port` guard in `_arcadedb.plugin.ports`.
 Added to `charts/arcadedb/tests/helpers_test.yaml`:
 - custom plugin enabled without `class` → `failedTemplate`.
 - (regression) custom plugin with `class` still renders correctly (already covered).
+
+Result: `helm unittest charts/arcadedb` → 165/165 pass; `helm lint` clean.
+
+## Pull request
+
+https://github.com/ArcadeData/arcadedb-helm/pull/17
+
+## Review cycles
+
+- **cycle 1** — head `30ae750`
+  - changes: fail-fast guard for missing custom-plugin `class` + unit test + tracking doc.
+  - `gemini-code-assist`: COMMENTED — "There are no review comments to address, and no
+    further feedback is provided." No actionable items.
+  - `claude`: no response within the 15-minute poll window (bot appears inactive on this
+    repo — no `claude`-authored reviews on the last 20 PRs).
+
+## Final state
+
+`timeout` — only one of the two configured reviewers (`gemini-code-assist`) responded, and
+its review carried no actionable items. No code changes were required by review. PR left
+open for the developer to merge.
