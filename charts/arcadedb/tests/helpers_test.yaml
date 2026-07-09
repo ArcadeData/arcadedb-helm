@@ -102,6 +102,14 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.plugins=myplugin:com.example.MyPlugin"
 
+  - it: custom plugin without class fails the template render
+    set:
+      arcadedb.plugins.bolt.enabled: true
+      arcadedb.plugins.bolt.port: 7687
+    asserts:
+      - failedTemplate:
+          errorPattern: "Custom plugin 'bolt' has no class specified."
+
   - it: prometheus plugin emits requireAuthentication=false when set
     set:
       arcadedb.plugins.prometheus.enabled: true
