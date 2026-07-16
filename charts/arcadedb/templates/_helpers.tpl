@@ -84,8 +84,9 @@ KubernetesAutoJoin can resolve any pod ordinal up to the maximum scale.
 {{- $fullname := (include "arcadedb.fullname" .) -}}
 {{- $k8sSuffix := (include "arcadedb.k8sSuffix" .) -}}
 {{- $rpcPort := int .Values.service.rpc.port -}}
+{{- $httpPort := int .Values.service.http.port -}}
 {{- range $i, $_ := until $replicas }}
-{{- $names = append $names (printf "%s-%d%s:%d" $fullname $i $k8sSuffix $rpcPort) }}
+{{- $names = append $names (printf "%s-%d%s:%d:%d" $fullname $i $k8sSuffix $rpcPort $httpPort) }}
 {{- end }}
 {{- join "," $names -}}
 {{- end }}
