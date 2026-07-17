@@ -217,32 +217,52 @@ persistence:
     ## @param persistence.config.storageClass StorageClass name for config PVC. Empty = cluster default.
     storageClass: ""
 
-## @param volumes Additional pod volumes.
-## Reserved names managed by the chart — do NOT reuse them here:
-## arcadedb-data, arcadedb-config, arcadedb-logs, arcadedb-tmp, arcadedb-raft.
-volumes: []
-# - name: extra-config
-#   configMap:
-#     name: my-arcadedb-config
+## @param volumeMounts Pod volume mounts, rendered verbatim. Defaults mount the
+## reserved arcadedb-* volumes at the server's data / config / log / tmp / raft
+## directories. Keep names in sync with `volumes` / `volumeClaimTemplates`, and the
+## paths in sync with arcadedb.databaseDirectory / configDirectory / logsDirectory /
+## ha.raftStorageDirectory if you change those.
+volumeMounts:
+  - name: arcadedb-data
+    mountPath: /home/arcadedb/databases
+  - name: arcadedb-config
+    mountPath: /home/arcadedb/config
+  - name: arcadedb-logs
+    mountPath: /home/arcadedb/log
+  - name: arcadedb-tmp
+    mountPath: /tmp
+  - name: arcadedb-raft
+    mountPath: /home/arcadedb/raft
 
-## @param volumeMounts Additional container volume mounts
-volumeMounts: []
-# - name: extra-config
-#   mountPath: /etc/arcadedb/extra
-#   readOnly: true
+## @param volumes Pod volumes, rendered verbatim. Defaults back every reserved mount
+## with an ephemeral emptyDir. To persist data / config / Raft state, remove that name
+## here and declare a matching entry under `volumeClaimTemplates` (a StatefulSet
+## auto-mounts a per-replica volume of the same name).
+volumes:
+  - name: arcadedb-data
+    emptyDir: {}
+  - name: arcadedb-config
+    emptyDir: {}
+  - name: arcadedb-logs
+    emptyDir: {}
+  - name: arcadedb-tmp
+    emptyDir: {}
+  - name: arcadedb-raft
+    emptyDir: {}
 
-## @param volumeClaimTemplates Extra StatefulSet volumeClaimTemplates (e.g. replication, backups).
-## The database and config PVCs are controlled by persistence.* above; do not redeclare
-## arcadedb-data or arcadedb-config here.
+## @param volumeClaimTemplates StatefulSet per-replica PVCs, rendered verbatim. Empty
+## by default (all volumes are emptyDir). Add an entry named arcadedb-data /
+## arcadedb-config / arcadedb-raft (and drop the matching emptyDir from `volumes`) to
+## persist that directory; or add your own for backups / replication.
 volumeClaimTemplates: []
 # - metadata:
-#     name: arcadedb-backups
+#     name: arcadedb-data
 #   spec:
 #     accessModes:
 #       - ReadWriteOnce
 #     resources:
 #       requests:
-#         storage: 1Gi
+#         storage: 8Gi
 
 ## @param nodeSelector Node selector
 nodeSelector: {}

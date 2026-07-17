@@ -82,22 +82,10 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.volumeMounts }}
           volumeMounts:
-            - name: arcadedb-data
-              mountPath: {{ .Values.arcadedb.databaseDirectory }}
-            - name: arcadedb-config
-              mountPath: {{ .Values.arcadedb.configDirectory }}
-            - name: arcadedb-logs
-              mountPath: {{ .Values.arcadedb.logsDirectory }}
-            - name: arcadedb-tmp
-              mountPath: /tmp
-            {{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled }}
-            - name: arcadedb-raft
-              mountPath: {{ .Values.arcadedb.ha.raftStorageDirectory }}
-            {{- end }}
-            {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
-            {{- end }}
+          {{- end }}
           env:
             - name: HOSTNAME
               valueFrom:
@@ -125,26 +113,10 @@ spec:
             {{- with .Values.arcadedb.extraEnvironment }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+      {{- with .Values.volumes }}
       volumes:
-        - name: arcadedb-logs
-          emptyDir: {}
-        - name: arcadedb-tmp
-          emptyDir: {}
-        {{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled }}
-        - name: arcadedb-raft
-          emptyDir: {}
-        {{- end }}
-        {{- if not .Values.persistence.enabled }}
-        - name: arcadedb-data
-          emptyDir: {}
-        {{- end }}
-        {{- if not .Values.persistence.config.enabled }}
-        - name: arcadedb-config
-          emptyDir: {}
-        {{- end }}
-        {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}
-        {{- end }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -157,33 +129,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- with .Values.volumeClaimTemplates }}
   volumeClaimTemplates:
-    {{- if .Values.persistence.enabled }}
-    - metadata:
-        name: arcadedb-data
-      spec:
-        accessModes:
-          - {{ .Values.persistence.accessMode }}
-        {{- if .Values.persistence.storageClass }}
-        storageClassName: {{ .Values.persistence.storageClass }}
-        {{- end }}
-        resources:
-          requests:
-            storage: {{ .Values.persistence.size }}
-    {{- end }}
-    {{- if .Values.persistence.config.enabled }}
-    - metadata:
-        name: arcadedb-config
-      spec:
-        accessModes:
-          - {{ .Values.persistence.config.accessMode }}
-        {{- if .Values.persistence.config.storageClass }}
-        storageClassName: {{ .Values.persistence.config.storageClass }}
-        {{- end }}
-        resources:
-          requests:
-            storage: {{ .Values.persistence.config.size }}
-    {{- end }}
-    {{- with .Values.volumeClaimTemplates }}
     {{- toYaml . | nindent 4 }}
-    {{- end }}
+  {{- end }}
