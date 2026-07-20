@@ -140,11 +140,15 @@ The command removes all the Kubernetes components associated with the chart and 
 | `autoscaling.minReplicas`                    | Minimum replicas. Must satisfy Raft quorum when HA is active: >= floor(maxReplicas/2)+1.                      | `1`     |
 | `autoscaling.maxReplicas`                    | Maximum replicas. Chart enforces quorum guard at render time.                                                 | `5`     |
 | `autoscaling.targetCPUUtilizationPercentage` |                                                                                                               | `80`    |
-| `volumes`                                    | Additional volumes on the output StatefulSet definition.              | `[]`    |
-| `volumeMounts`                               | Additional volumeMounts on the output StatefulSet definition.         | `[]`    |
-| `volumeClaimTemplates`                       | Extra StatefulSet volumeClaimTemplates (the database PVC is controlled by `persistence.enabled`). | `[]` |
+| `volumes`                                    | Pod volumes, rendered verbatim. Defaults back every reserved `arcadedb-*` mount with an `emptyDir`. | see `values.yaml` |
+| `volumeMounts`                               | Pod volume mounts, rendered verbatim. Defaults mount the reserved `arcadedb-*` volumes at the data / config / log / tmp / raft directories. | see `values.yaml` |
+| `volumeClaimTemplates`                       | StatefulSet per-replica PVCs, rendered verbatim. Empty by default.    | `[]`    |
 
 ### persistence
+
+> **Not wired up.** Since the volumes refactor these values are only read by
+> `NOTES.txt`; they no longer create any PVC. Use `volumeClaimTemplates` instead
+> (see [Persistence](#persistence-1) below).
 
 | Name                       | Description                                                                                         | Value           |
 |----------------------------|-----------------------------------------------------------------------------------------------------|-----------------|
@@ -234,9 +238,48 @@ helm install my-arcadedb ./arcadedb -f values.yaml
 
 ## Persistence
 
-The ArcadeDB image stores data at `/home/arcadedb/databases` inside the container. By default (`persistence.enabled: true`), a
-PersistentVolumeClaim named `arcadedb-data` is created and mounted at that path. Set `persistence.enabled` to `false` only for
-ephemeral or development deployments - data will be written to the container's writable layer and lost when the Pod is deleted.
+Storage is fully value-driven: `volumes`, `volumeMounts`, and `volumeClaimTemplates` are rendered verbatim into the
+StatefulSet. The chart ships five reserved volumes, mounted at the directories the server actually uses:
+
+| Volume            | Mount path                | Contents                          |
+|-------------------|---------------------------|-----------------------------------|
+| `arcadedb-data`   | `/home/arcadedb/databases`| Databases                         |
+| `arcadedb-config` | `/home/arcadedb/config`   | Users, tokens, server settings     |
+| `arcadedb-logs`   | `/home/arcadedb/log`      | Server logs                       |
+| `arcadedb-tmp`    | `/tmp`                    | Scratch space                     |
+| `arcadedb-raft`   | `/home/arcadedb/raft`     | Raft state (HA)                   |
+
+**All five default to `emptyDir`, so nothing survives a Pod restart out of the box.** To persist a directory, drop its
+`emptyDir` entry from `volumes` and declare a `volumeClaimTemplates` entry of the same name — a StatefulSet auto-mounts a
+per-replica volume matching the claim name, so `volumeMounts` needs no change:
+
+```yaml
+volumes:
+  # arcadedb-data removed - backed by the claim template below
+  - name: arcadedb-config
+    emptyDir: {}
+  - name: arcadedb-logs
+    emptyDir: {}
+  - name: arcadedb-tmp
+    emptyDir: {}
+  - name: arcadedb-raft
+    emptyDir: {}
+
+volumeClaimTemplates:
+  - metadata:
+      name: arcadedb-data
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: 8Gi
+```
+
+For a durable HA cluster, give `arcadedb-config` and `arcadedb-raft` claim templates too. You can also add claim templates
+under your own names (backups, replication) alongside a matching `volumeMounts` entry.
+
+If you change `arcadedb.databaseDirectory`, `arcadedb.configDirectory`, `arcadedb.logsDirectory`, or
+`ha.raftStorageDirectory`, update the corresponding `volumeMounts` path to match.
 
 ## Ingress
 

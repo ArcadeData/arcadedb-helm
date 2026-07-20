@@ -16,6 +16,19 @@ helm install my-arcadedb arcadedb/arcadedb
 
 See [charts/arcadedb/README.md](charts/arcadedb/README.md) and [charts/arcadedb/values.yaml](charts/arcadedb/values.yaml) for all available options.
 
+## Storage
+
+`volumes`, `volumeMounts`, and `volumeClaimTemplates` are rendered verbatim into
+the StatefulSet. The chart ships five reserved volumes — `arcadedb-data`,
+`arcadedb-config`, `arcadedb-logs`, `arcadedb-tmp`, `arcadedb-raft` — mounted at
+the directories the server uses.
+
+**Every one defaults to `emptyDir`, so a fresh install is ephemeral.** To persist
+a directory, remove its `emptyDir` from `volumes` and add a
+`volumeClaimTemplates` entry of the same name; the StatefulSet mounts the
+per-replica PVC under the existing mount path. See
+[Persistence](charts/arcadedb/README.md#persistence-1) for a worked example.
+
 ## Observability
 
 ArcadeDB 26.7.1+ exposes opt-in, behavior-preserving observability. All knobs
