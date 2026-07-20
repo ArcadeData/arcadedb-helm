@@ -5,8 +5,8 @@ description: |
 
 type: application
 
-version: 26.7.2
+version: 26.7.3
 
-appVersion: "26.7.2"
+appVersion: "26.7.3"
 annotations:
   artifacthub.io/repositoryID: "fb85acb7-fb5b-4572-b44b-374a2b52658d"
