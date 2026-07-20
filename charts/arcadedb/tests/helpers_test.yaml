@@ -35,7 +35,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].command
-          content: "-Darcadedb.ha.serverList=test-arcadedb-0.test-arcadedb.default.svc.cluster.local:2434,test-arcadedb-1.test-arcadedb.default.svc.cluster.local:2434,test-arcadedb-2.test-arcadedb.default.svc.cluster.local:2434"
+          content: "-Darcadedb.ha.serverList=test-arcadedb-0.test-arcadedb.default.svc.cluster.local:2434:2480,test-arcadedb-1.test-arcadedb.default.svc.cluster.local:2434:2480,test-arcadedb-2.test-arcadedb.default.svc.cluster.local:2434:2480"
 
   - it: arcadedb.nodenames sizes to autoscaling.maxReplicas when HPA enabled and larger than replicaCount
     set:
@@ -46,7 +46,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].command
-          content: "-Darcadedb.ha.serverList=test-arcadedb-0.test-arcadedb.default.svc.cluster.local:2434,test-arcadedb-1.test-arcadedb.default.svc.cluster.local:2434,test-arcadedb-2.test-arcadedb.default.svc.cluster.local:2434,test-arcadedb-3.test-arcadedb.default.svc.cluster.local:2434,test-arcadedb-4.test-arcadedb.default.svc.cluster.local:2434"
+          content: "-Darcadedb.ha.serverList=test-arcadedb-0.test-arcadedb.default.svc.cluster.local:2434:2480,test-arcadedb-1.test-arcadedb.default.svc.cluster.local:2434:2480,test-arcadedb-2.test-arcadedb.default.svc.cluster.local:2434:2480,test-arcadedb-3.test-arcadedb.default.svc.cluster.local:2434:2480,test-arcadedb-4.test-arcadedb.default.svc.cluster.local:2434:2480"
 
   - it: arcadedb.nodenames uses custom rpc port
     set:
@@ -55,7 +55,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].command
-          content: "-Darcadedb.ha.serverList=test-arcadedb-0.test-arcadedb.default.svc.cluster.local:5555,test-arcadedb-1.test-arcadedb.default.svc.cluster.local:5555"
+          content: "-Darcadedb.ha.serverList=test-arcadedb-0.test-arcadedb.default.svc.cluster.local:5555:2480,test-arcadedb-1.test-arcadedb.default.svc.cluster.local:5555:2480"
 
   - it: arcadedb.plugin.parameters emits gremlin plugin entry and port
     set:
