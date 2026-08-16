@@ -39,6 +39,8 @@ The command removes all the Kubernetes components associated with the chart and 
 | `arcadedb.defaultDatabases`  | Databases to create at startup. Empty = none.                      | `""`                                    |
 | `arcadedb.extraCommands`     | Extra JVM -D arguments appended to the startup command             | `["-Darcadedb.server.mode=production"]` |
 | `arcadedb.extraEnvironment`  | Additional environment variables to pass to the ArcadeDB container | `[]`                                    |
+| `arcadedb.installDirectory`  | Directory the ArcadeDB distribution lives in inside the image      | `/home/arcadedb`                        |
+| `arcadedb.consoleWorkingDirectory` | Writable working directory for interactive tools (console)   | `/tmp`                                  |
 
 ### arcadedb.credentials
 
@@ -280,6 +282,28 @@ under your own names (backups, replication) alongside a matching `volumeMounts` 
 
 If you change `arcadedb.databaseDirectory`, `arcadedb.configDirectory`, `arcadedb.logsDirectory`, or
 `ha.raftStorageDirectory`, update the corresponding `volumeMounts` path to match.
+
+## Console
+
+Run the interactive console inside a pod:
+
+```bash
+kubectl exec -it <release>-arcadedb-0 -- bin/console.sh
+```
+
+The console keeps a command history in `.history`, resolved against the JVM working directory. The image's working
+directory is the install directory, which is unwritable because the chart defaults to
+`securityContext.readOnlyRootFilesystem: true` — so the console would warn `Failed to save history` after every command.
+
+To avoid that, the chart exports `ARCADEDB_SETTINGS=-Duser.dir=<arcadedb.consoleWorkingDirectory>`, which both
+`bin/console.sh` and `bin/server.sh` splice into their `java` command line. The history file therefore lands in
+`/tmp/.history`, backed by the ephemeral `arcadedb-tmp` volume, with `0600` permissions.
+
+The server itself is unaffected: its startup command passes `-Duser.dir=<arcadedb.installDirectory>` after the
+environment variable, so it keeps resolving `config/` and `backups/` exactly where it always has.
+
+Point `arcadedb.consoleWorkingDirectory` at another writable mount to keep the history elsewhere, or set it to `""` to
+drop both settings.
 
 ## Ingress
 

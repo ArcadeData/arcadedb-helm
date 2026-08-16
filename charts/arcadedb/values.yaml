@@ -19,6 +19,19 @@ arcadedb:
   ## Backed by a writable emptyDir and forwarded via the ARCADEDB_LOG_DIR env var
   ## so logging works under readOnlyRootFilesystem.
   logsDirectory: "/home/arcadedb/log"
+  ## @param arcadedb.installDirectory Directory the ArcadeDB distribution lives in
+  ## inside the image (ARCADEDB_HOME, and the image WORKDIR). The server pins its
+  ## JVM working directory here, so relocating consoleWorkingDirectory cannot move
+  ## the paths the server resolves relative to it (config/, backups/).
+  installDirectory: "/home/arcadedb"
+  ## @param arcadedb.consoleWorkingDirectory Writable directory used as the JVM
+  ## working directory by interactive tools started inside the pod, notably
+  ## bin/console.sh. JLine writes the console history to <dir>/.history, which
+  ## fails on the read-only root filesystem when it lands in installDirectory.
+  ## Delivered through the ARCADEDB_SETTINGS environment variable, so it must be
+  ## backed by a writable volume: it defaults to the arcadedb-tmp emptyDir mounted
+  ## at /tmp. Set to "" to opt out.
+  consoleWorkingDirectory: "/tmp"
 
   ## @section arcadedb.ha
   ha:

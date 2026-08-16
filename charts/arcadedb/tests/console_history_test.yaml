@@ -1,0 +1,101 @@
+suite: Console history under readOnlyRootFilesystem
+templates:
+  - statefulset.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  # Issue #22: bin/console.sh asks JLine for the relative history file ".history",
+  # which resolves against the JVM working directory. With the image WORKDIR
+  # (/home/arcadedb) that path sits on the read-only root filesystem, so every
+  # console command prints "Failed to save history". The chart points interactive
+  # tools at a writable working directory instead.
+  - it: interactive tools get a writable working directory via ARCADEDB_SETTINGS
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ARCADEDB_SETTINGS
+            value: -Duser.dir=/tmp
+
+  - it: the console working directory is backed by a writable emptyDir
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-tmp
+            emptyDir: {}
+
+  # server.sh splices $ARCADEDB_SETTINGS in before the chart's command arguments,
+  # so this later -D wins and the server keeps the working directory it has today.
+  # Without it the server auto-detects arcadedb.server.rootPath as /tmp and dies
+  # writing config/server-users.jsonl.
+  - it: the server process pins its working directory back to the install directory
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Duser.dir=/home/arcadedb
+
+  - it: arcadedb.consoleWorkingDirectory override flows through to ARCADEDB_SETTINGS
+    set:
+      arcadedb.consoleWorkingDirectory: /home/arcadedb/log
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ARCADEDB_SETTINGS
+            value: -Duser.dir=/home/arcadedb/log
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Duser.dir=/home/arcadedb
+
+  - it: arcadedb.installDirectory override flows through to the server pin
+    set:
+      arcadedb.installDirectory: /opt/arcadedb
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Duser.dir=/opt/arcadedb
+
+  - it: empty arcadedb.consoleWorkingDirectory opts out of both settings
+    set:
+      arcadedb.consoleWorkingDirectory: ""
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ARCADEDB_SETTINGS
+            value: -Duser.dir=/tmp
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Duser.dir=/home/arcadedb
+
+  - it: user-supplied ARCADEDB_SETTINGS is rendered after the chart default so it wins
+    set:
+      arcadedb.extraEnvironment:
+        - name: ARCADEDB_SETTINGS
+          value: -Duser.dir=/var/tmp
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[-1]
+          value:
+            name: ARCADEDB_SETTINGS
+            value: -Duser.dir=/var/tmp
+
+  - it: the console working directory is unaffected by HA
+    set:
+      replicaCount: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ARCADEDB_SETTINGS
+            value: -Duser.dir=/tmp
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Duser.dir=/home/arcadedb

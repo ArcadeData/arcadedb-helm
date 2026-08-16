@@ -143,14 +143,14 @@ PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
-echo "==> [1/7] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
+echo "==> [1/8] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
 echo "    All 3 pods Ready."
 
 # ── phase 2: liveness health probe ────────────────────────────────────────────
 
-echo "==> [2/7] Asserting /api/v1/health liveness endpoint..."
+echo "==> [2/8] Asserting /api/v1/health liveness endpoint..."
 PF_PID=$(pf_start 0 "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to pod-0 failed"; exit 1; }
 assert_health_204 "$HTTP_PORT" || exit 1
@@ -158,14 +158,14 @@ pf_stop "$PF_PID"
 
 # ── phase 3: raft formation ───────────────────────────────────────────────────
 
-echo "==> [3/7] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+echo "==> [3/8] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
 assert_quorum_n 3 || exit 1
 
 # ── phase 4: write ────────────────────────────────────────────────────────────
 
 # LEADER_ORDINAL is set by assert_quorum_n above.
 
-echo "==> [4/7] Writing test data via leader pod-${LEADER_ORDINAL}..."
+echo "==> [4/8] Writing test data via leader pod-${LEADER_ORDINAL}..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
 
@@ -185,7 +185,7 @@ echo "    Write complete."
 
 # ── phase 5: read and assert ──────────────────────────────────────────────────
 
-echo "==> [5/7] Reading back test data..."
+echo "==> [5/8] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
   | jq -r '.result[0].name // empty') || {
@@ -204,7 +204,7 @@ echo "    Got: '${RESULT}'"
 
 # ── phase 6: STATUS column ────────────────────────────────────────────────────
 
-echo "==> [6/7] Asserting STATUS=HEALTHY for all peers..."
+echo "==> [6/8] Asserting STATUS=HEALTHY for all peers..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -214,7 +214,7 @@ pf_stop "$PF_PID"
 
 # ── phase 7: leadership transfer ──────────────────────────────────────────────
 
-echo "==> [7/7] Transferring Raft leadership..."
+echo "==> [7/8] Transferring Raft leadership..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -282,14 +282,70 @@ echo "    Write via new leader succeeded."
 LEADERS[0]=$NEW_LEADER
 LEADER_ORDINAL=$NEW_LEADER_ORDINAL
 
-# Phases 7 (helm-upgrade scale-up 3->5) and 8 (snapshot-install recovery) were
+# ── phase 8: console history under readOnlyRootFilesystem (issue #22) ─────────
+
+echo "==> [8/8] Asserting the console can write its history file..."
+POD="${RELEASE}-0"
+
+# bin/console.sh asks JLine for the relative history file ".history", resolved
+# against the JVM working directory. The chart moves that directory to a writable
+# volume through ARCADEDB_SETTINGS; without it the console writes into the
+# read-only image install directory and warns on every command.
+CONSOLE_SETTINGS=$(kubectl exec -n "$NAMESPACE" "$POD" -- \
+  sh -c 'printf %s "${ARCADEDB_SETTINGS:-}"')
+
+case "$CONSOLE_SETTINGS" in
+  *-Duser.dir=*) ;;
+  *) echo "ERROR: ARCADEDB_SETTINGS carries no -Duser.dir (got '${CONSOLE_SETTINGS:-<unset>}')"
+     exit 1 ;;
+esac
+
+CONSOLE_DIR=${CONSOLE_SETTINGS##*-Duser.dir=}
+CONSOLE_DIR=${CONSOLE_DIR%% *}
+echo "    Console working directory: ${CONSOLE_DIR}"
+
+# The exec session is the console's launch context, so probe from there.
+kubectl exec -n "$NAMESPACE" "$POD" -- \
+  sh -c "cd '${CONSOLE_DIR}' && touch .history && rm -f .history" || {
+  echo "ERROR: ${CONSOLE_DIR}/.history is not writable - the console would fail to save history"
+  exit 1
+}
+echo "    ${CONSOLE_DIR}/.history is writable."
+
+# The default working directory (image WORKDIR) must stay read-only: that is the
+# hardening this phase exists to keep honest.
+if kubectl exec -n "$NAMESPACE" "$POD" -- \
+     sh -c 'touch .history-probe 2>/dev/null && rm -f .history-probe' 2>/dev/null; then
+  echo "    WARNING: the image install directory is writable; readOnlyRootFilesystem is off."
+else
+  echo "    Image install directory is read-only, as expected."
+fi
+
+# The server process keeps the working directory it has always had, so its own
+# relative path resolution (config/, backups/) is untouched by the console fix.
+kubectl exec -n "$NAMESPACE" "$POD" -- \
+  sh -c 'tr "\0" "\n" </proc/1/cmdline' | grep -qx -- "-Duser.dir=/home/arcadedb" || {
+  echo "ERROR: server process is not pinned to -Duser.dir=/home/arcadedb"
+  exit 1
+}
+echo "    Server process pinned to /home/arcadedb."
+
+# Finally, the console itself must still start with those settings applied.
+CONSOLE_OUT=$(kubectl exec -n "$NAMESPACE" "$POD" -- bin/console.sh "help" 2>&1) || {
+  echo "ERROR: bin/console.sh failed to run inside the pod"
+  echo "$CONSOLE_OUT"
+  exit 1
+}
+echo "    bin/console.sh runs inside the pod."
+
+# Phases 9 (helm-upgrade scale-up 3->5) and 10 (snapshot-install recovery) were
 # planned but discarded after CI proved the scenarios are not supported by the
 # current ArcadeDB image: a `helm upgrade --set replicaCount=5` rolling-restarts
 # all StatefulSet pods AND adds two with a serverList of 5 entries, but Raft
 # does not auto-vote in the new peers (the support email confirms this requires
 # an explicit POST /api/v1/cluster/peer call from the leader). The cluster ends
 # up unable to re-form quorum after the rolling restart. The snapshot-install
-# phase depended on the post-scale-up cluster, so it was dropped with phase 7.
+# phase depended on the post-scale-up cluster, so it was dropped with phase 9.
 # See docs/superpowers/specs/2026-05-09-ha-integration-tests-design.md for the
 # updated rationale.
 

@@ -52,6 +52,16 @@ spec:
               protocol: TCP
           command:
             - bin/server.sh
+            {{- if .Values.arcadedb.consoleWorkingDirectory }}
+            {{- /*
+              ARCADEDB_SETTINGS (below) moves the JVM working directory so the
+              interactive console can write its history file under a read-only
+              root filesystem. server.sh splices $ARCADEDB_SETTINGS in ahead of
+              these arguments, so this later -D pins the server itself back to
+              the install directory and leaves its path resolution unchanged.
+            */}}
+            - -Duser.dir={{ .Values.arcadedb.installDirectory }}
+            {{- end }}
             - -Darcadedb.dumpConfigAtStartup=true
             - -Darcadedb.server.name=$(HOSTNAME)
             - -Darcadedb.server.rootPassword=$(rootPassword)
@@ -110,6 +120,10 @@ spec:
               {{- end }}
             - name: ARCADEDB_LOG_DIR
               value: {{ .Values.arcadedb.logsDirectory | quote }}
+            {{- with .Values.arcadedb.consoleWorkingDirectory }}
+            - name: ARCADEDB_SETTINGS
+              value: {{ printf "-Duser.dir=%s" . | quote }}
+            {{- end }}
             {{- with .Values.arcadedb.extraEnvironment }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
