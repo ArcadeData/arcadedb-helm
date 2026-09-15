@@ -53,4 +53,4 @@ tests:
       arcadedb.plugins.myplugin.class: com.example.MyPlugin
     asserts:
       - failedTemplate:
-          errorMessage: "Custom plugin 'myplugin' has no port specified. Set port: false for a plugin that listens on nothing."
+          errorMessage: "Custom plugin 'myplugin' has no port specified."

@@ -113,7 +113,7 @@ Preparing a list of plugin ports to build plugin configurations.
         {{- $port = -1 }}
       {{- else }}
         {{- if not (hasKey $config "port") }}
-          {{- fail (printf "Custom plugin '%s' has no port specified. Set port: false for a plugin that listens on nothing." $plugin) -}}
+          {{- fail (printf "Custom plugin '%s' has no port specified." $plugin) -}}
         {{- end }}
         {{- if not $config.class }}
           {{- fail (printf "Custom plugin '%s' has no class specified." $plugin) -}}
