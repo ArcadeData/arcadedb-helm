@@ -130,9 +130,9 @@ specified" assertion updated to match the improved error message that now mentio
 2. `observability.tracing.enabled` never registers `TracingPlugin` — **fixed**, same helper.
 3. Portless custom plugin cannot be expressed — **fixed**, `_arcadedb.plugin.ports` now
    accepts `port: false` as the same `-1` sentinel `prometheus` already uses internally,
-   while an absent `port` key still fails fast (preserves issue #16's convention and the
-   existing `quorum_guard_test.yaml` regression test, message extended to mention the
-   new option).
+   while an absent `port` key still fails fast with the original, unchanged error message
+   (preserves issue #16's convention and leaves `quorum_guard_test.yaml`'s existing
+   assertion untouched, per this skill's "never modify existing tests" constraint).
 
 ## Residual risk
 
