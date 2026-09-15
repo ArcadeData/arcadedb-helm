@@ -31,6 +31,12 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.serverMetrics.tracing.samplingRate=0.0"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "Otlp:com.arcadedb.metrics.otlp.OtlpMetricsPlugin"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "Tracing:com.arcadedb.tracing.TracingPlugin"
 
   - it: logging.format=json emits the logFormat arg
     set:
@@ -66,6 +72,14 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.serverMetrics.otlp.endpoint=http://otel-collector:4317"
 
+  - it: otlp metrics enabled registers the OtlpMetricsPlugin
+    set:
+      observability.metrics.otlp.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.plugins=Otlp:com.arcadedb.metrics.otlp.OtlpMetricsPlugin"
+
   - it: tracing enabled emits enable + endpoint + samplingRate args
     set:
       observability.tracing.enabled: true
@@ -81,6 +95,26 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.serverMetrics.tracing.samplingRate=0.1"
+
+  - it: tracing enabled registers the TracingPlugin
+    set:
+      observability.tracing.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.plugins=Tracing:com.arcadedb.tracing.TracingPlugin"
+
+  - it: otlp + tracing + a custom plugin all appear in one comma-joined plugin list
+    set:
+      observability.metrics.otlp.enabled: true
+      observability.tracing.enabled: true
+      arcadedb.plugins.myplugin.enabled: true
+      arcadedb.plugins.myplugin.port: 1234
+      arcadedb.plugins.myplugin.class: com.example.MyPlugin
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.plugins=myplugin:com.example.MyPlugin,Otlp:com.arcadedb.metrics.otlp.OtlpMetricsPlugin,Tracing:com.arcadedb.tracing.TracingPlugin"
 
   - it: readinessRequiresHA emits the arg plus the default readinessHAMaxLag
     set:

@@ -112,13 +112,20 @@ Preparing a list of plugin ports to build plugin configurations.
         */}}
         {{- $port = -1 }}
       {{- else }}
-        {{- if not $config.port }}
-          {{- fail (printf "Custom plugin '%s' has no port specified." $plugin) -}}
+        {{- if not (hasKey $config "port") }}
+          {{- fail (printf "Custom plugin '%s' has no port specified. Set port: false for a plugin that listens on nothing." $plugin) -}}
         {{- end }}
         {{- if not $config.class }}
           {{- fail (printf "Custom plugin '%s' has no class specified." $plugin) -}}
         {{- end }}
-        {{- $port = $config.port }}
+        {{/*
+        port: false declares a plugin that listens on nothing, the same -1 sentinel prometheus uses above.
+        */}}
+        {{- if $config.port }}
+          {{- $port = $config.port }}
+        {{- else }}
+          {{- $port = -1 }}
+        {{- end }}
       {{- end }}
 {{ $plugin }}:
   port: {{ $port }}
@@ -157,6 +164,15 @@ Create a comma separated list of plugins to be enabled in arcadedb
       {{- $plugins = append $plugins (printf "%s:%s" $plugin $config.class) -}}
     {{- end -}}
   {{- end -}}
+{{- $o := .Values.observability | default dict -}}
+{{- $otlp := (($o.metrics | default dict).otlp) | default dict -}}
+{{- $tracing := $o.tracing | default dict -}}
+{{- if $otlp.enabled -}}
+  {{- $plugins = append $plugins "Otlp:com.arcadedb.metrics.otlp.OtlpMetricsPlugin" -}}
+{{- end -}}
+{{- if $tracing.enabled -}}
+  {{- $plugins = append $plugins "Tracing:com.arcadedb.tracing.TracingPlugin" -}}
+{{- end -}}
 {{- if gt (len $plugins) 0 -}}
 - -Darcadedb.server.plugins={{ join "," $plugins }}
 {{- end -}}

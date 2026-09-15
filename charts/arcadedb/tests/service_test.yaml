@@ -138,6 +138,17 @@ tests:
           path: spec.ports
           content: { port: 1234, targetPort: 1234, protocol: TCP, name: myplugin-port }
 
+  - it: custom plugin with port=false does not add a service port (portless sentinel)
+    set:
+      arcadedb.plugins.myplugin.enabled: true
+      arcadedb.plugins.myplugin.port: false
+      arcadedb.plugins.myplugin.class: com.example.MyPlugin
+    documentIndex: 1
+    asserts:
+      - notContains:
+          path: spec.ports
+          content: { name: myplugin-port }
+
   - it: headless service selector matches StatefulSet selector
     documentIndex: 1
     asserts:

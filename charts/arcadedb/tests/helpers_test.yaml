@@ -110,6 +110,16 @@ tests:
       - failedTemplate:
           errorPattern: "Custom plugin 'bolt' has no class specified."
 
+  - it: custom plugin with port=false renders without a port param and does not fail
+    set:
+      arcadedb.plugins.myplugin.enabled: true
+      arcadedb.plugins.myplugin.port: false
+      arcadedb.plugins.myplugin.class: com.example.MyPlugin
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.plugins=myplugin:com.example.MyPlugin"
+
   - it: prometheus plugin emits requireAuthentication=false when set
     set:
       arcadedb.plugins.prometheus.enabled: true

@@ -77,6 +77,11 @@ arcadedb:
     #   enabled: true
     #   port: 1234
     #   class: com.example.MyPlugin
+    ## Custom plugin that listens on no port (set port: false instead of a dummy value):
+    # myPortlessPlugin:
+    #   enabled: true
+    #   port: false
+    #   class: com.example.MyPortlessPlugin
 
 ## @section image
 image:
