@@ -165,6 +165,146 @@ tests:
     asserts:
       - equal: { path: spec.template.spec.serviceAccountName, value: my-sa }
 
+  - it: StatefulSet metadata accepts custom annotations and labels
+    set:
+      statefulSetAnnotations:
+        example.com/owner: platform
+      statefulSetLabels:
+        app.kubernetes.io/component: database
+    asserts:
+      - equal:
+          path: metadata.annotations["example.com/owner"]
+          value: platform
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: database
+
+  - it: TLS adds HTTPS port, certificate mounts, and SSL startup arguments
+    set:
+      tls.enabled: true
+      tls.bolt: REQUIRED
+      arcadedb.plugins.bolt.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content: { name: https, containerPort: 2490, protocol: TCP }
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tls-certs
+            mountPath: /etc/certs/arcadedb
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls-certs
+            secret:
+              secretName: test-arcadedb-tls
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.enabled=true"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.httpsIncomingPort=2490"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.bolt.ssl=REQUIRED"
+
+  - it: TLS volume mount uses the configured path and secret
+    set:
+      tls.enabled: true
+      tls.mountPath: /var/run/arcadedb-tls
+      tls.secretRef.name: custom-arcadedb-tls
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].name
+          value: tls-certs
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].mountPath
+          value: /var/run/arcadedb-tls
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].readOnly
+          value: true
+      - equal:
+          path: spec.template.spec.volumes[0].name
+          value: tls-certs
+      - equal:
+          path: spec.template.spec.volumes[0].secret.secretName
+          value: custom-arcadedb-tls
+
+  - it: cert-manager TLS uses PKCS12 certificate store names
+    set:
+      tls.enabled: true
+      tls.certManager.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Djavax.net.ssl.trustStoreType=PKCS12"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.keyStore=/etc/certs/arcadedb/keystore.p12"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.trustStore=/etc/certs/arcadedb/truststore.p12"
+
+  - it: cert-manager TLS falls back to the key store when the issuer provides no CA
+    set:
+      tls.enabled: true
+      tls.certManager.enabled: true
+      tls.certManager.issuerProvidesCA: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.trustStore=/etc/certs/arcadedb/keystore.p12"
+
+  - it: TLS store passwords come from a secret-backed env var, never inline
+    set:
+      tls.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.keyStorePassword=$(TLS_STORE_PASSWORD)"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.trustStorePassword=$(TLS_STORE_PASSWORD)"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TLS_STORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: arcadedb-credentials-secret
+                key: rootPassword
+
+  - it: TLS_STORE_PASSWORD is absent without TLS
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: TLS_STORE_PASSWORD
+
+  - it: PID file and XDG cache follow arcadedb.tmpDirectory
+    set:
+      arcadedb.tmpDirectory: /scratch
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: ARCADEDB_PID, value: /scratch/arcadedb.pid }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: XDG_CACHE_HOME, value: /scratch/.cache }
+
+  - it: empty arcadedb.tmpDirectory keeps the image defaults
+    set:
+      arcadedb.tmpDirectory: ""
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: ARCADEDB_PID
+
   - it: env contains HOSTNAME from metadata.name field reference
     asserts:
       - contains:
@@ -523,6 +663,39 @@ tests:
           content:
             name: arcadedb-config
             emptyDir: {}
+
+  - it: backupConfigMap and mcpConfigMap render read-only JSON mounts from named ConfigMaps
+    set:
+      arcadedb.configDirectory: /custom/config
+      arcadedb.backupConfigMap: backup
+      arcadedb.mcpConfigMap: mcp
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-config-backup-json
+            mountPath: /custom/config/backup.json
+            subPath: backup.json
+            readOnly: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-config-mcp-json
+            mountPath: /custom/config/mcp-config.json
+            subPath: mcp-config.json
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-config-backup-json
+            configMap:
+              name: backup
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-config-mcp-json
+            configMap:
+              name: mcp
 
   - it: log dir is wired via ARCADEDB_LOG_DIR and backed by a writable emptyDir
     asserts:

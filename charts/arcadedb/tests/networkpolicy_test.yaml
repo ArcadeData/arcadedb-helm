@@ -81,6 +81,21 @@ tests:
           path: spec.ingress[0].ports[0].port
           value: 9090
 
+  - it: http policy includes HTTPS and enabled plugin ports
+    set:
+      networkPolicy.enabled: true
+      tls.enabled: true
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 8182
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.ingress[0].ports
+          content: { port: 2490, protocol: TCP }
+      - contains:
+          path: spec.ingress[0].ports
+          content: { port: 8182, protocol: TCP }
+
   - it: raft policy port reflects custom service.rpc.port
     set:
       networkPolicy.enabled: true

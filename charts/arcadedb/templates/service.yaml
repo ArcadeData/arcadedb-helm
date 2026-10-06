@@ -12,6 +12,12 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.tls.enabled }}
+    - port: {{ .Values.service.https.port }}
+      targetPort: https
+      protocol: TCP
+      name: https
+    {{- end }}
   selector:
     {{- include "arcadedb.selectorLabels" . | nindent 4 }}
 
@@ -36,6 +42,12 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.tls.enabled }}
+    - port: {{ .Values.service.https.port }}
+      targetPort: https
+      protocol: TCP
+      name: https
+    {{- end }}
     - port: {{ .Values.service.rpc.port }}
       targetPort: rpc
       protocol: TCP
@@ -43,3 +55,35 @@ spec:
     {{- include "arcadedb.plugin.service" . | nindent 4 }}
   selector:
     {{- include "arcadedb.selectorLabels" . | nindent 4 }}
+{{/*
+External service for exposing all protocol ports outside the cluster.
+*/}}
+{{- if .Values.service.external.enabled }}
+{{- if ne .Values.service.http.type "ClusterIP" }}
+{{-  fail "service.http.type must be ClusterIP when service.external.enabled is true (the external service replaces it)" -}}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "arcadedb.fullname" . }}-external
+  labels:
+    {{- include "arcadedb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: external
+spec:
+  type: {{ .Values.service.external.type }}
+  ports:
+    - port: {{ .Values.service.http.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    {{- if .Values.tls.enabled }}
+    - port: {{ .Values.service.https.port }}
+      targetPort: https
+      protocol: TCP
+      name: https
+    {{- end }}
+    {{- include "arcadedb.plugin.service" . | nindent 4 }}
+  selector:
+    {{- include "arcadedb.selectorLabels" . | nindent 4 }}
+{{- end }}

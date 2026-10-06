@@ -3,8 +3,15 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ include "arcadedb.fullname" . }}
+    {{- with .Values.statefulSetAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   labels:
     {{- include "arcadedb.labels" . | nindent 4 }}
+    {{- with .Values.statefulSetLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   serviceName: {{ include "arcadedb.fullname" . }}
   podManagementPolicy: Parallel
@@ -47,6 +54,11 @@ spec:
             - name: http
               containerPort: {{ .Values.service.http.port }}
               protocol: TCP
+          {{- if .Values.tls.enabled }}
+            - name: https
+              containerPort: {{ .Values.service.https.port }}
+              protocol: TCP
+          {{- end }}
             - name: rpc
               containerPort: {{ .Values.service.rpc.port }}
               protocol: TCP
@@ -64,6 +76,7 @@ spec:
             {{- end }}
             - -Darcadedb.dumpConfigAtStartup=true
             - -Darcadedb.server.name=$(HOSTNAME)
+            - -Darcadedb.server.httpIncomingPort={{ .Values.service.http.port }}
             - -Darcadedb.server.rootPassword=$(rootPassword)
             - -Darcadedb.server.databaseDirectory={{ .Values.arcadedb.databaseDirectory }}
             - -Darcadedb.server.defaultDatabases={{ .Values.arcadedb.defaultDatabases }}
@@ -80,6 +93,7 @@ spec:
             {{- end }}
             {{- include "arcadedb.plugin.parameters" . | nindent 12 }}
             {{- include "arcadedb.observability.args" . | nindent 12 }}
+            {{- include "arcadedb.tls.parameters" . | nindent 12 }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
@@ -92,10 +106,27 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.volumeMounts }}
           volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- if .Values.arcadedb.backupConfigMap }}
+            - name: arcadedb-config-backup-json
+              mountPath: {{ .Values.arcadedb.configDirectory }}/backup.json
+              subPath: backup.json
+              readOnly: true
+            {{- end }}
+            {{- if .Values.arcadedb.mcpConfigMap }}
+            - name: arcadedb-config-mcp-json
+              mountPath: {{ .Values.arcadedb.configDirectory }}/mcp-config.json
+              subPath: mcp-config.json
+              readOnly: true
+            {{- end }}
+            {{- if .Values.tls.enabled }}
+            - name: tls-certs
+              mountPath: {{ .Values.tls.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.volumeMounts }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: HOSTNAME
               valueFrom:
@@ -120,6 +151,19 @@ spec:
               {{- end }}
             - name: ARCADEDB_LOG_DIR
               value: {{ .Values.arcadedb.logsDirectory | quote }}
+            {{- with .Values.arcadedb.tmpDirectory }}
+            - name: ARCADEDB_PID
+              value: {{ printf "%s/arcadedb.pid" . | quote }}
+            - name: XDG_CACHE_HOME
+              value: {{ printf "%s/.cache" . | quote }}
+            {{- end }}
+            {{- if .Values.tls.enabled }}
+            - name: TLS_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "arcadedb.tls.passwordSecretName" . }}
+                  key: {{ include "arcadedb.tls.passwordSecretKey" . }}
+            {{- end }}
             {{- with .Values.arcadedb.consoleWorkingDirectory }}
             - name: ARCADEDB_SETTINGS
               value: {{ printf "-Duser.dir=%s" . | quote }}
@@ -127,10 +171,25 @@ spec:
             {{- with .Values.arcadedb.extraEnvironment }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-      {{- with .Values.volumes }}
       volumes:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- if .Values.arcadedb.backupConfigMap }}
+        - name: arcadedb-config-backup-json
+          configMap:
+            name: {{ .Values.arcadedb.backupConfigMap }}
+        {{- end }}
+        {{- if .Values.arcadedb.mcpConfigMap }}
+        - name: arcadedb-config-mcp-json
+          configMap:
+            name: {{ .Values.arcadedb.mcpConfigMap }}
+        {{- end }}
+        {{- if .Values.tls.enabled }}
+        - name: tls-certs
+          secret:
+            secretName: {{ include "arcadedb.tls.secretName" . }}
+        {{- end }}
+        {{- with .Values.volumes }}
+          {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

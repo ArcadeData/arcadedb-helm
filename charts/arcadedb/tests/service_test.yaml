@@ -78,6 +78,24 @@ tests:
           path: spec.ports
           content: { port: 5000, targetPort: rpc, protocol: TCP, name: rpc }
 
+  - it: headless service exposes HTTPS when TLS is enabled
+    set:
+      tls.enabled: true
+    documentIndex: 1
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 2490, targetPort: https, protocol: TCP, name: https }
+
+  - it: client http service exposes HTTPS when TLS is enabled
+    set:
+      tls.enabled: true
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 2490, targetPort: https, protocol: TCP, name: https }
+
   - it: headless service exposes gremlin plugin port when enabled
     set:
       arcadedb.plugins.gremlin.enabled: true
@@ -158,3 +176,36 @@ tests:
       - equal:
           path: spec.selector["app.kubernetes.io/instance"]
           value: test
+
+  - it: external service exposes configured protocol ports
+    set:
+      service.external.enabled: true
+      service.external.type: NodePort
+      tls.enabled: true
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 8182
+    documentIndex: 2
+    asserts:
+      - isKind: { of: Service }
+      - equal: { path: metadata.name, value: test-arcadedb-external }
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: external
+      - equal: { path: spec.type, value: NodePort }
+      - contains:
+          path: spec.ports
+          content: { port: 2480, targetPort: http, protocol: TCP, name: http }
+      - contains:
+          path: spec.ports
+          content: { port: 2490, targetPort: https, protocol: TCP, name: https }
+      - contains:
+          path: spec.ports
+          content: { port: 8182, targetPort: 8182, protocol: TCP, name: gremlin-port }
+
+  - it: external service fails when the client service is not ClusterIP
+    set:
+      service.external.enabled: true
+      service.http.type: LoadBalancer
+    asserts:
+      - failedTemplate:
+          errorMessage: "service.http.type must be ClusterIP when service.external.enabled is true (the external service replaces it)"

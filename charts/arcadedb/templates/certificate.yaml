@@ -1,0 +1,47 @@
+{{- if and .Values.tls.enabled .Values.tls.certManager.enabled }}
+{{- $fullname := include "arcadedb.fullname" . }}
+{{- $services := list $fullname (printf "%s-http" $fullname) }}
+{{- if .Values.service.external.enabled }}
+{{- $services = append $services (printf "%s-external" $fullname) }}
+{{- end }}
+kind: Certificate
+apiVersion: cert-manager.io/v1
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "arcadedb.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    {{- range $svc := $services }}
+    - {{ $svc }}
+    - {{ $svc }}.{{ $.Release.Namespace }}
+    - {{ $svc }}.{{ $.Release.Namespace }}.svc
+    - {{ $svc }}.{{ $.Release.Namespace }}.svc.cluster.local
+    {{- end }}
+    {{- range $n := split "," (include "arcadedb.nodehosts" .) }}
+    - {{ $n }}
+    {{- end }}
+    {{- with .Values.tls.certManager.extraDnsNames }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  subject:
+    organizations:
+      - {{ $fullname }}
+  isCA: false
+  usages:
+    - server auth
+    - client auth
+  secretName: {{ include "arcadedb.tls.secretName" . }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    kind: {{ .Values.tls.certManager.issuerRef.kind }}
+    name: {{ required "tls.certManager.issuerRef.name is required when tls.certManager.enabled" .Values.tls.certManager.issuerRef.name }}
+  keystores:
+    pkcs12:
+      create: true
+      passwordSecretRef:
+        name: {{ include "arcadedb.tls.passwordSecretName" . }}
+        key: {{ include "arcadedb.tls.passwordSecretKey" . }}
+{{- end }}
