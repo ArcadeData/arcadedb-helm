@@ -110,12 +110,6 @@ When a new ArcadeDB version is released:
 4. The latest-image guard needs no change — it keeps watching the next cycle's
    rolling image.
 
-> **Pending — 26.7.1:** the chart is already at `appVersion: 26.7.1` (the
-> observability feature shipped ahead of the image), and the integration job is
-> temporarily pinned to `latest` per step 3. When `arcadedata/arcadedb:26.7.1`
-> is published, remove the `with:` override in `.github/workflows/lint.yml`,
-> re-run CI, and delete this note. Steps 1–2 are already done for this release.
-
 ## Release
 
 New chart versions are published via the GitHub Actions Release workflow:
