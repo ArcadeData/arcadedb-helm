@@ -12,6 +12,12 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if .Values.tls.enabled }}
+    - port: {{ .Values.service.https.port }}
+      targetPort: https
+      protocol: TCP
+      name: https
+    {{- end }}
   selector:
     {{- include "arcadedb.selectorLabels" . | nindent 4 }}
 
@@ -49,14 +55,14 @@ spec:
     {{- include "arcadedb.plugin.service" . | nindent 4 }}
   selector:
     {{- include "arcadedb.selectorLabels" . | nindent 4 }}
----
 {{/*
 External service for exposing all protocol ports outside the cluster.
 */}}
 {{- if .Values.service.external.enabled }}
 {{- if ne .Values.service.http.type "ClusterIP" }}
-{{-  fail "http.type must be ClusterIP when external service is enabled" -}}
+{{-  fail "service.http.type must be ClusterIP when service.external.enabled is true (the external service replaces it)" -}}
 {{- end }}
+---
 apiVersion: v1
 kind: Service
 metadata:

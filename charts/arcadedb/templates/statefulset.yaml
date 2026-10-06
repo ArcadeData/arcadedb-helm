@@ -151,10 +151,19 @@ spec:
               {{- end }}
             - name: ARCADEDB_LOG_DIR
               value: {{ .Values.arcadedb.logsDirectory | quote }}
+            {{- with .Values.arcadedb.tmpDirectory }}
             - name: ARCADEDB_PID
-              value: /tmp/arcadedb.pid
+              value: {{ printf "%s/arcadedb.pid" . | quote }}
             - name: XDG_CACHE_HOME
-              value: /tmp/.cache
+              value: {{ printf "%s/.cache" . | quote }}
+            {{- end }}
+            {{- if .Values.tls.enabled }}
+            - name: TLS_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "arcadedb.tls.passwordSecretName" . }}
+                  key: {{ include "arcadedb.tls.passwordSecretKey" . }}
+            {{- end }}
             {{- with .Values.arcadedb.consoleWorkingDirectory }}
             - name: ARCADEDB_SETTINGS
               value: {{ printf "-Duser.dir=%s" . | quote }}
@@ -176,7 +185,7 @@ spec:
         {{- if .Values.tls.enabled }}
         - name: tls-certs
           secret:
-            secretName: {{ .Values.tls.secretRef.name }}
+            secretName: {{ include "arcadedb.tls.secretName" . }}
         {{- end }}
         {{- with .Values.volumes }}
           {{- toYaml . | nindent 8 }}

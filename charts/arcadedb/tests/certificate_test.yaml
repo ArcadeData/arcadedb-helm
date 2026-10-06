@@ -89,7 +89,77 @@ tests:
         certManager:
           enabled: true
           extraDnsNames: ["extra-dns-name.local"]
+          issuerRef:
+            name: arcadedb-issuer
     asserts:
       - contains:
           path: spec.dnsNames
           content: extra-dns-name.local
+
+  - it: covers the client-facing http and external services in the DNS names
+    set:
+      tls.enabled: true
+      tls.certManager.enabled: true
+      tls.certManager.issuerRef.name: arcadedb-issuer
+      service.external.enabled: true
+    asserts:
+      - contains:
+          path: spec.dnsNames
+          content: test-arcadedb-http
+      - contains:
+          path: spec.dnsNames
+          content: test-arcadedb-http.default.svc
+      - contains:
+          path: spec.dnsNames
+          content: test-arcadedb-external.default.svc.cluster.local
+      - equal:
+          path: spec.secretName
+          value: test-arcadedb-tls
+
+  - it: omits the external service DNS names when it is disabled
+    set:
+      tls.enabled: true
+      tls.certManager.enabled: true
+      tls.certManager.issuerRef.name: arcadedb-issuer
+    asserts:
+      - notContains:
+          path: spec.dnsNames
+          content: test-arcadedb-external
+
+  - it: keystore password follows a user-supplied root password secret
+    set:
+      tls.enabled: true
+      tls.certManager.enabled: true
+      tls.certManager.issuerRef.name: arcadedb-issuer
+      arcadedb.credentials.rootPassword.secret.name: my-root
+      arcadedb.credentials.rootPassword.secret.key: pw
+    asserts:
+      - equal:
+          path: spec.keystores.pkcs12.passwordSecretRef.name
+          value: my-root
+      - equal:
+          path: spec.keystores.pkcs12.passwordSecretRef.key
+          value: pw
+
+  - it: keystore password uses an explicit TLS password secret
+    set:
+      tls.enabled: true
+      tls.certManager.enabled: true
+      tls.certManager.issuerRef.name: arcadedb-issuer
+      tls.secretRef.passwordSecret.name: tls-pw
+      tls.secretRef.passwordSecret.key: store
+    asserts:
+      - equal:
+          path: spec.keystores.pkcs12.passwordSecretRef.name
+          value: tls-pw
+      - equal:
+          path: spec.keystores.pkcs12.passwordSecretRef.key
+          value: store
+
+  - it: fails when the issuer name is missing
+    set:
+      tls.enabled: true
+      tls.certManager.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "tls.certManager.issuerRef.name is required when tls.certManager.enabled"

@@ -57,6 +57,7 @@ The command removes all the Kubernetes components associated with the chart and 
 | `arcadedb.logsDirectory`               | Directory where the server writes log files                       | `/home/arcadedb/log`                     |
 | `arcadedb.installDirectory`            | Directory the ArcadeDB distribution lives in inside the image     | `/home/arcadedb`                         |
 | `arcadedb.consoleWorkingDirectory`     | Writable working directory for interactive tools (console)        | `/tmp`                                   |
+| `arcadedb.tmpDirectory`               | Writable dir for the PID file and `XDG_CACHE_HOME` (`""` = image defaults) | `/tmp`                         |
 | `arcadedb.ha.raftStorageDirectory`     | Parent directory for per-node Raft storage                        | `/home/arcadedb/raft`                    |
 
 ### arcadedb.plugins
@@ -143,15 +144,17 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `tls.enabled`                     | Enable TLS and mount the certificate Secret     | `false`                |
 | `tls.bolt`                        | Bolt TLS mode: OPTIONAL or REQUIRED             | `OPTIONAL`             |
 | `tls.mountPath`                   | Certificate mount path inside the container     | `/etc/certs/arcadedb`  |
-| `tls.secretRef.name`              | Secret containing TLS certificates              | `arcadedb-tls`         |
-| `tls.secretRef.password`          | Certificate store password                      | `$(rootPassword)`      |
+| `tls.secretRef.name`              | Secret containing TLS certificates (`""` = `<fullname>-tls`) | `""`      |
+| `tls.secretRef.passwordSecret.name` | Secret holding the store password (`""` = root password secret) | `""` |
+| `tls.secretRef.passwordSecret.key`  | Key inside `passwordSecret.name`              | `""`                   |
 | `tls.secretRef.keyStore.key`      | KeyStore key in the Secret                      | `keystore.p12`         |
 | `tls.secretRef.trustStore.format` | TrustStore format                               | `JKS`                  |
 | `tls.secretRef.trustStore.key`    | TrustStore key in the Secret                   | `truststore.jks`       |
 | `tls.certManager.enabled`         | Create a cert-manager Certificate resource     | `false`                |
 | `tls.certManager.extraDnsNames`   | Adds extra DNS names to the TLS certificate     | `[]`                   |
+| `tls.certManager.issuerProvidesCA` | Set `false` for issuers without a `ca.crt` (e.g. ACME): the key store doubles as trust store | `true` |
 | `tls.certManager.issuerRef.kind`  | cert-manager issuer kind                       | `ClusterIssuer`        |
-| `tls.certManager.issuerRef.name`  | cert-manager issuer name                       | `my-issuer`            |
+| `tls.certManager.issuerRef.name`  | cert-manager issuer name (required)            | `""`                   |
 
 ### ingress
 
@@ -402,7 +405,13 @@ TLS can be enabled for those protocols that support it by setting `tls.enabled` 
 A key Store and trust Store are required from a secret. The keystore must be in `PKCS12` format.
 The trust store defaults to `JKS` in line with Java defaults but `PKCS12` is supported - set `tls.secretRef.trustStore.format`.
 
-The chart supports using `cert-manager` to create a certificate with the correct stores. Set the `tls.certManager` values. The stores will use the root password.
+The store password is read from a Secret and injected through the `TLS_STORE_PASSWORD` environment variable, so it never
+appears in the pod spec. It defaults to the root password Secret; set `tls.secretRef.passwordSecret` to use another one.
+
+The chart supports using `cert-manager` to create a certificate with the correct stores. Set the `tls.certManager` values
+(`issuerRef.name` is required). The certificate covers the headless, `-http` and (when enabled) `-external` services plus
+every pod FQDN; add more names with `tls.certManager.extraDnsNames`. cert-manager only writes `truststore.p12` when the
+issuer returns a CA certificate, so for issuers that do not (e.g. ACME) set `tls.certManager.issuerProvidesCA` to `false`.
 
 ## Ingress And External Access
 

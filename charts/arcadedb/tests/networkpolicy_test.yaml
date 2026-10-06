@@ -26,7 +26,7 @@ tests:
           of: NetworkPolicy
       - equal:
           path: metadata.name
-          value: test-arcadedb-protocols
+          value: test-arcadedb-http
       - equal:
           path: spec.podSelector.matchLabels["app.kubernetes.io/name"]
           value: arcadedb
@@ -81,7 +81,7 @@ tests:
           path: spec.ingress[0].ports[0].port
           value: 9090
 
-  - it: protocols policy includes HTTPS and enabled plugin ports
+  - it: http policy includes HTTPS and enabled plugin ports
     set:
       networkPolicy.enabled: true
       tls.enabled: true

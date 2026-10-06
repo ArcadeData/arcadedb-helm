@@ -71,11 +71,11 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
-Create a comma-separated list of StatefulSet pod FQDNs for the Raft HA server list.
+Create a comma-separated list of StatefulSet pod FQDNs (no ports).
 When HPA is enabled, the list is sized to autoscaling.maxReplicas so that
 KubernetesAutoJoin can resolve any pod ordinal up to the maximum scale.
 */}}
-{{- define "arcadedb.nodenames" -}}
+{{- define "arcadedb.nodehosts" -}}
 {{- $replicas := int .Values.replicaCount -}}
 {{- if and .Values.autoscaling.enabled (gt (int .Values.autoscaling.maxReplicas) $replicas) -}}
   {{- $replicas = int .Values.autoscaling.maxReplicas -}}
@@ -85,6 +85,23 @@ KubernetesAutoJoin can resolve any pod ordinal up to the maximum scale.
 {{- $k8sSuffix := (include "arcadedb.k8sSuffix" .) -}}
 {{- range $i, $_ := until $replicas }}
 {{- $names = append $names (printf "%s-%d%s" $fullname $i $k8sSuffix) }}
+{{- end }}
+{{- join "," $names -}}
+{{- end }}
+
+{{/*
+Create the Raft HA server list: host:raftPort:httpPort per pod, plus
+:priority:httpsPort when TLS is on. Declaring the ports keeps peer HTTP/HTTPS
+endpoints explicit instead of relying on ArcadeDB's local-port fallback.
+*/}}
+{{- define "arcadedb.nodenames" -}}
+{{- $ports := printf "%d:%d" (int .Values.service.rpc.port) (int .Values.service.http.port) -}}
+{{- if .Values.tls.enabled -}}
+  {{- $ports = printf "%s:0:%d" $ports (int .Values.service.https.port) -}}
+{{- end -}}
+{{- $names := list -}}
+{{- range $host := split "," (include "arcadedb.nodehosts" .) }}
+{{- $names = append $names (printf "%s:%s" $host $ports) }}
 {{- end }}
 {{- join "," $names -}}
 {{- end }}
@@ -244,7 +261,37 @@ All opt-in; emits nothing when defaults are unchanged.
 {{- end -}}
 
 {{/*
-TLS parameters
+Name of the secret holding the TLS key store / trust store.
+*/}}
+{{- define "arcadedb.tls.secretName" -}}
+{{- default (printf "%s-tls" (include "arcadedb.fullname" .)) .Values.tls.secretRef.name -}}
+{{- end -}}
+
+{{/*
+Secret name and key holding the key store / trust store password.
+Defaults to the root password secret.
+*/}}
+{{- define "arcadedb.tls.passwordSecretName" -}}
+{{- with .Values.tls.secretRef.passwordSecret.name -}}
+{{- . -}}
+{{- else -}}
+{{- default "arcadedb-credentials-secret" .Values.arcadedb.credentials.rootPassword.secret.name -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "arcadedb.tls.passwordSecretKey" -}}
+{{- if .Values.tls.secretRef.passwordSecret.name -}}
+{{- required "tls.secretRef.passwordSecret.key is required when tls.secretRef.passwordSecret.name is set" .Values.tls.secretRef.passwordSecret.key -}}
+{{- else if .Values.arcadedb.credentials.rootPassword.secret.name -}}
+{{- .Values.arcadedb.credentials.rootPassword.secret.key -}}
+{{- else -}}
+rootPassword
+{{- end -}}
+{{- end -}}
+
+{{/*
+TLS parameters. Store passwords come from the TLS_STORE_PASSWORD env var
+(a secretKeyRef), so they never appear in the pod spec.
 */}}
 {{- define "arcadedb.tls.parameters" -}}
 {{- if .Values.tls.enabled }}
@@ -259,15 +306,16 @@ TLS parameters
   {{- if .Values.tls.certManager.enabled }}
     {{- $keyStoreKey = "keystore.p12" -}}
     {{- $trustStoreFormat = "PKCS12" -}}
-    {{- $trustStoreKey = "truststore.p12" -}}
+    {{- /* cert-manager only writes truststore.p12 when the issuer returns a CA */ -}}
+    {{- $trustStoreKey = ternary "truststore.p12" "keystore.p12" .Values.tls.certManager.issuerProvidesCA -}}
   {{- end }}
   {{- if ne "JKS" $trustStoreFormat }}
 - -Djavax.net.ssl.trustStoreType={{ $trustStoreFormat }}
   {{- end }}
 - -Darcadedb.ssl.keyStore={{ printf "%s/%s" .Values.tls.mountPath $keyStoreKey }}
-- -Darcadedb.ssl.keyStorePassword={{ .Values.tls.secretRef.password }}
+- -Darcadedb.ssl.keyStorePassword=$(TLS_STORE_PASSWORD)
 - -Darcadedb.ssl.trustStore={{ printf "%s/%s" .Values.tls.mountPath $trustStoreKey }}
-- -Darcadedb.ssl.trustStorePassword={{ .Values.tls.secretRef.password }}
+- -Darcadedb.ssl.trustStorePassword=$(TLS_STORE_PASSWORD)
 {{- end }}
 {{- end -}}
 

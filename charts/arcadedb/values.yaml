@@ -36,6 +36,10 @@ arcadedb:
   ## backed by a writable volume: it defaults to the arcadedb-tmp emptyDir mounted
   ## at /tmp. Set to "" to opt out.
   consoleWorkingDirectory: "/tmp"
+  ## @param arcadedb.tmpDirectory Writable directory for the server PID file
+  ## (ARCADEDB_PID) and XDG_CACHE_HOME. Must be backed by a writable volume
+  ## (defaults to the arcadedb-tmp emptyDir). Set to "" to keep the image defaults.
+  tmpDirectory: "/tmp"
 
   ## @section arcadedb.ha
   ha:
@@ -185,11 +189,17 @@ tls:
 
   ## @section tls.secretRef
   secretRef:
-    ## @param tls.secretRef.name Name of the secret containing TLS certificates
-    name: arcadedb-tls
+    ## @param tls.secretRef.name Name of the secret containing TLS certificates ("" = <fullname>-tls)
+    name: ""
 
-    ## @param tls.secretRef.password Password for the certificate stores
-    password: $(rootPassword)
+    ## @section tls.secretRef.passwordSecret
+    ## Secret holding the key store / trust store password. When name is empty the
+    ## root password secret is used. Injected through an env var, never inlined.
+    passwordSecret:
+      ## @param tls.secretRef.passwordSecret.name Secret name ("" = root password secret)
+      name: ""
+      ## @param tls.secretRef.passwordSecret.key Key inside the secret
+      key: ""
 
     ## @section tls.secretRef.keyStore
     keyStore:
@@ -209,14 +219,20 @@ tls:
     enabled: false
 
     ## @param tls.certManager.extraDnsNames Adds extra DNS names to the TLS certificate
+    ## (the services and pod FQDNs are always included)
     extraDnsNames: []
+
+    ## @param tls.certManager.issuerProvidesCA Set false when the issuer does not
+    ## return a ca.crt (e.g. ACME): cert-manager then writes no truststore.p12, so
+    ## the key store is used as the trust store instead.
+    issuerProvidesCA: true
 
     ## @section tls.certManager.issuerRef
     issuerRef:
       ## @param tls.certManager.issuerRef.kind Kind of the cert-manager issuer
       kind: ClusterIssuer
       ## @param tls.certManager.issuerRef.name Name of the cert-manager issuer
-      name: my-issuer
+      name: ""
 
 ## @section ingress
 ingress:
@@ -377,8 +393,9 @@ extraManifests: {}
 ## @section networkPolicy
 networkPolicy:
   ## @param networkPolicy.enabled Create NetworkPolicy resources.
-  ## When enabled: HTTP (2480) is open to all cluster pods; Raft gRPC (2434) is restricted
-  ## to ArcadeDB pods only. Recommended for production multi-tenant clusters.
+  ## When enabled: HTTP (2480), HTTPS (when TLS is on) and enabled plugin ports are open to
+  ## all cluster pods; Raft gRPC (2434) is restricted to ArcadeDB pods only. Recommended for
+  ## production multi-tenant clusters.
   enabled: false
 
 ## @section observability

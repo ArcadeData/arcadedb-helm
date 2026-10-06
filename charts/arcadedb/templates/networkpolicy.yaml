@@ -2,7 +2,7 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "arcadedb.fullname" . }}-protocols
+  name: {{ include "arcadedb.fullname" . }}-http
   labels:
     {{- include "arcadedb.labels" . | nindent 4 }}
 spec:

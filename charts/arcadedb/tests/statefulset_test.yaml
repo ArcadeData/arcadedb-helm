@@ -199,7 +199,7 @@ tests:
           content:
             name: tls-certs
             secret:
-              secretName: arcadedb-tls
+              secretName: test-arcadedb-tls
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.ssl.enabled=true"
@@ -246,6 +246,64 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.ssl.trustStore=/etc/certs/arcadedb/truststore.p12"
+
+  - it: cert-manager TLS falls back to the key store when the issuer provides no CA
+    set:
+      tls.enabled: true
+      tls.certManager.enabled: true
+      tls.certManager.issuerProvidesCA: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.trustStore=/etc/certs/arcadedb/keystore.p12"
+
+  - it: TLS store passwords come from a secret-backed env var, never inline
+    set:
+      tls.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.keyStorePassword=$(TLS_STORE_PASSWORD)"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.trustStorePassword=$(TLS_STORE_PASSWORD)"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TLS_STORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: arcadedb-credentials-secret
+                key: rootPassword
+
+  - it: TLS_STORE_PASSWORD is absent without TLS
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: TLS_STORE_PASSWORD
+
+  - it: PID file and XDG cache follow arcadedb.tmpDirectory
+    set:
+      arcadedb.tmpDirectory: /scratch
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: ARCADEDB_PID, value: /scratch/arcadedb.pid }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: XDG_CACHE_HOME, value: /scratch/.cache }
+
+  - it: empty arcadedb.tmpDirectory keeps the image defaults
+    set:
+      arcadedb.tmpDirectory: ""
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: ARCADEDB_PID
 
   - it: env contains HOSTNAME from metadata.name field reference
     asserts:

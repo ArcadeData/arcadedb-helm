@@ -87,6 +87,15 @@ tests:
           path: spec.ports
           content: { port: 2490, targetPort: https, protocol: TCP, name: https }
 
+  - it: client http service exposes HTTPS when TLS is enabled
+    set:
+      tls.enabled: true
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 2490, targetPort: https, protocol: TCP, name: https }
+
   - it: headless service exposes gremlin plugin port when enabled
     set:
       arcadedb.plugins.gremlin.enabled: true
@@ -199,4 +208,4 @@ tests:
       service.http.type: LoadBalancer
     asserts:
       - failedTemplate:
-          errorMessage: "http.type must be ClusterIP when external service is enabled"
+          errorMessage: "service.http.type must be ClusterIP when service.external.enabled is true (the external service replaces it)"
