@@ -356,3 +356,34 @@ annotations. Returns YAML (possibly empty).
 {{- toYaml $annotations -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Merge user-supplied initContainers with the config-chown init container.
+config-chown is generated if config maps are mounted over the config directory on a persistent volume.
+Returns YAML (possibly empty).
+*/}}
+{{- define "arcadedb.initContainers" -}}
+  {{- if and .Values.initContainers.configDirectory.volumeName .Values.initContainers.configDirectory.mountPath (or .Values.arcadedb.backupConfigMap .Values.arcadedb.mcpConfigMap) -}}
+- name: config-chown
+  image: {{ .Values.initContainers.configDirectory.image }}
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: false
+  command:
+    - "sh"
+    - "-c"
+    - |
+      DIR="{{ .Values.arcadedb.configDirectory }}"
+      if [ ! -d "$DIR" ]; then
+        echo "Creating config directory $DIR"
+        mkdir -p "$DIR"
+        chown {{ .Values.securityContext.runAsUser }}:{{ .Values.securityContext.runAsGroup }} "$DIR"
+      fi
+  volumeMounts:
+    - name: {{ .Values.initContainers.configDirectory.volumeName }}
+      mountPath: {{ .Values.initContainers.configDirectory.mountPath }}
+  {{- end -}}
+  {{- with .Values.initContainers.otherContainers }}
+  {{- printf "\n%s" (toYaml .) }}
+  {{- end }}
+{{- end -}}
