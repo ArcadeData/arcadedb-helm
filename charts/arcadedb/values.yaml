@@ -367,6 +367,22 @@ volumeClaimTemplates: []
 #       requests:
 #         storage: 8Gi
 
+## @section initContainers Configuration for init containers
+initContainers:
+  ## @section initContainers.configDirectory
+  ## If the config directory is mounted on a persistent volume and config maps are enabled then the
+  ## config directory ownership must be set before ArcadeDB starts.
+  ## The config-chown init container is generated to ensure this ownership.
+  configDirectory:
+    ## @param initContainers.configDirectory.image Image for the config-chown init container
+    image: busybox:latest
+    ## @param initContainers.configDirectory.mountPath Mount path for the config directory
+    mountPath: null
+    ## @param initContainers.configDirectory.volumeName Volume name for the config directory
+    volumeName: null
+  ## @param initContainers.otherContainers Additional init containers to include
+  otherContainers: []
+
 ## @param nodeSelector Node selector
 nodeSelector: {}
 

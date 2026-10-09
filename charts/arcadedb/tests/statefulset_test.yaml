@@ -614,6 +614,68 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.defaultDatabases=Universe[admin:pwd]"
 
+  - it: initContainers are omitted by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  - it: config-chown and custom init containers render with configured values
+    set:
+      arcadedb.configDirectory: /var/lib/arcadedb/config
+      arcadedb.backupConfigMap: backup
+      initContainers.configDirectory.image: busybox:1.36
+      initContainers.configDirectory.mountPath: /mnt/arcadedb-config
+      initContainers.configDirectory.volumeName: arcadedb-config-pvc
+      initContainers.otherContainers:
+        - name: wait-for-config
+          image: busybox:1.36
+          command: ["sh", "-c", "test -d /var/lib/arcadedb/config"]
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 2
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-chown
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: busybox:1.36
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts[0].name
+          value: arcadedb-config-pvc
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts[0].mountPath
+          value: /mnt/arcadedb-config
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: wait-for-config
+      - equal:
+          path: spec.template.spec.initContainers[1].image
+          value: busybox:1.36
+
+  - it: custom init containers render without config-chown when no config map is configured
+    set:
+      initContainers.configDirectory.mountPath: /mnt/arcadedb-config
+      initContainers.configDirectory.volumeName: arcadedb-config-pvc
+      initContainers.otherContainers:
+        - name: custom-init
+          image: busybox:1.36
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 1
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: custom-init
+
+  - it: config map does not create config-chown without a volume name
+    set:
+      arcadedb.backupConfigMap: backup
+      initContainers.configDirectory.mountPath: /mnt/arcadedb-config
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
   # ── config dir ───────────────────────────────────────────────────────────────
 
   - it: config dir is a writable emptyDir by default with no volumeClaimTemplates

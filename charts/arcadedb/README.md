@@ -100,6 +100,22 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `image.tag`        | Overrides the image tag whose default is the chart appVersion.                                                                                                                                   | `""`           |
 | `imagePullSecrets` | This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/ | `[]`           |
 
+### initContainers
+
+### initContainers.configDirectory
+
+| Name                                       | Description                                                      | Value            |
+|--------------------------------------------|------------------------------------------------------------------|------------------|
+| `initContainers.configDirectory.image`     | Image for the generated config-chown init container              | `busybox:latest` |
+| `initContainers.configDirectory.mountPath` | Mount path for the config volume in the generated init container |                  |
+| `initContainers.configDirectory.volumeName`| Volume name mounted by the generated config-chown init container |                  |
+
+### initContainers.otherContainers
+
+| Name                              | Description                             | Value |
+|-----------------------------------|-----------------------------------------|-------|
+| `initContainers.otherContainers`  | Additional user-defined init containers | `[]` |
+
 ### serviceAccount
 
 | Name                         | Description                                                                                          | Value  |
@@ -375,6 +391,21 @@ under your own names (backups, replication) alongside a matching `volumeMounts` 
 
 If you change `arcadedb.databaseDirectory`, `arcadedb.configDirectory`, `arcadedb.logsDirectory`, or
 `ha.raftStorageDirectory`, update the corresponding `volumeMounts` path to match.
+
+### Config Directory Permissions
+
+ArcadeDB runs as a non-root user, but a newly mounted persistent volume may be owned by root. If ArcadeDB's config
+directory is on that volume, it may not be able to write there. When either `arcadedb.backupConfigMap` or
+`arcadedb.mcpConfigMap` is set, configure `initContainers.configDirectory.volumeName` and
+`initContainers.configDirectory.mountPath` to the values used for the config directory 
+to add an init container that will give the directory to the ArcadeDB user and group configured by
+`securityContext.runAsUser` and `securityContext.runAsGroup`. 
+
+It does not change ownership if the directory already exists. Both settings are required, and the generated container is omitted if neither config map is set.
+
+The init container image defaults to `busybox:latest` and can be overridden with
+`initContainers.configDirectory.image`. User-defined init containers in `initContainers.otherContainers` are also
+rendered and follow the ownership container when it is generated.
 
 ## Console
 
