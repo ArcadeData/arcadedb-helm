@@ -300,6 +300,9 @@ TLS parameters. Store passwords come from the TLS_STORE_PASSWORD env var
   {{- if and (hasKey .Values.arcadedb.plugins "bolt") .Values.arcadedb.plugins.bolt.enabled }}
 - -Darcadedb.bolt.ssl={{ .Values.tls.bolt }}
   {{- end }}
+  {{- if and (hasKey .Values.arcadedb.plugins "postgres") .Values.arcadedb.plugins.postgres.enabled }}
+- -Darcadedb.postgres.ssl={{ .Values.tls.postgres }}
+  {{- end }}
   {{- $keyStoreKey := .Values.tls.secretRef.keyStore.key }}
   {{- $trustStoreKey := .Values.tls.secretRef.trustStore.key }}
   {{- $trustStoreFormat := .Values.tls.secretRef.trustStore.format }}

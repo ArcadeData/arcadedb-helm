@@ -78,6 +78,7 @@ spec:
             - -Darcadedb.server.name=$(HOSTNAME)
             - -Darcadedb.server.httpIncomingPort={{ .Values.service.http.port }}
             - -Darcadedb.server.rootPassword=$(rootPassword)
+            - -Darcadedb.server.configDirectory={{ .Values.arcadedb.configDirectory }}
             - -Darcadedb.server.databaseDirectory={{ .Values.arcadedb.databaseDirectory }}
             - -Darcadedb.server.defaultDatabases={{ .Values.arcadedb.defaultDatabases }}
             {{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled }}

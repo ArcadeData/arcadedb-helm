@@ -183,7 +183,9 @@ tests:
     set:
       tls.enabled: true
       tls.bolt: REQUIRED
+      tls.postgres: REQUIRED
       arcadedb.plugins.bolt.enabled: true
+      arcadedb.plugins.postgres.enabled: true
     asserts:
       - contains:
           path: spec.template.spec.containers[0].ports
@@ -209,6 +211,9 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.bolt.ssl=REQUIRED"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.postgres.ssl=REQUIRED"
 
   - it: TLS volume mount uses the configured path and secret
     set:
@@ -593,8 +598,11 @@ tests:
           path: spec.volumeClaimTemplates[0].metadata.name
           value: arcadedb-backups
 
-  - it: command includes default databaseDirectory and defaultDatabases flags
+  - it: command includes default configDirectory, databaseDirectory and defaultDatabases flags
     asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.configDirectory=/home/arcadedb/config"
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.databaseDirectory=/home/arcadedb/databases"
@@ -602,11 +610,15 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.defaultDatabases="
 
-  - it: arcadedb.databaseDirectory and defaultDatabases flow through
+  - it: arcadedb.configDirectory, arcadedb.databaseDirectory and defaultDatabases flow through
     set:
+      arcadedb.configDirectory: /custom/config
       arcadedb.databaseDirectory: /custom/dir
       arcadedb.defaultDatabases: "Universe[admin:pwd]"
     asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.configDirectory=/custom/config"
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.databaseDirectory=/custom/dir"

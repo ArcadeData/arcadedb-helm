@@ -143,6 +143,7 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 |-----------------------------------|--------------------------------------------------|------------------------|
 | `tls.enabled`                     | Enable TLS and mount the certificate Secret     | `false`                |
 | `tls.bolt`                        | Bolt TLS mode: OPTIONAL or REQUIRED             | `OPTIONAL`             |
+| `tls.postgres`                    | PostgreSQL TLS mode: OPTIONAL or REQUIRED       | `OPTIONAL`             |
 | `tls.mountPath`                   | Certificate mount path inside the container     | `/etc/certs/arcadedb`  |
 | `tls.secretRef.name`              | Secret containing TLS certificates (`""` = `<fullname>-tls`) | `""`      |
 | `tls.secretRef.passwordSecret.name` | Secret holding the store password (`""` = root password secret) | `""` |

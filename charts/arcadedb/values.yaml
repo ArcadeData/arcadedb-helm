@@ -184,6 +184,9 @@ tls:
   ## @param tls.bolt Bolt TLS option. OPTIONAL or REQUIRED
   bolt: OPTIONAL
 
+  ## @param tls.postgres Postgres TLS option. OPTIONAL or REQUIRED
+  postgres: OPTIONAL
+
   ## @param tls.mountPath Path where TLS certificates are mounted in the container.
   mountPath: /etc/certs/arcadedb
 
