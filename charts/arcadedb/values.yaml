@@ -367,6 +367,31 @@ volumeClaimTemplates: []
 #       requests:
 #         storage: 8Gi
 
+## @section initContainers Configuration for init containers
+initContainers:
+  ## @section initContainers.configDirectory
+  ## When the config directory lives on a persistent volume, Kubernetes can create it as root
+  ## (for example while mounting backup.json / mcp-config.json into it), and ArcadeDB then
+  ## cannot write users or settings. Setting volumeName and mountPath adds a config-chown init
+  ## container that creates arcadedb.configDirectory on that volume if needed and chowns it to
+  ## securityContext.runAsUser:runAsGroup. It runs as root with only CHOWN and DAC_OVERRIDE.
+  configDirectory:
+    ## @param initContainers.configDirectory.volumeName Name of the volume holding the config directory (e.g. a volumeClaimTemplates entry). Empty = no config-chown container.
+    volumeName: ""
+    ## @param initContainers.configDirectory.mountPath Path that volume is mounted at in the ArcadeDB container. Must be arcadedb.configDirectory or one of its parents.
+    mountPath: ""
+    image:
+      ## @param initContainers.configDirectory.image.registry Registry for the config-chown image
+      registry: docker.io
+      ## @param initContainers.configDirectory.image.repository Repository for the config-chown image
+      repository: library/busybox
+      ## @param initContainers.configDirectory.image.tag Tag for the config-chown image
+      tag: "1.37.0"
+      ## @param initContainers.configDirectory.image.pullPolicy Pull policy for the config-chown image
+      pullPolicy: IfNotPresent
+  ## @param initContainers.otherContainers Additional init containers, rendered verbatim after config-chown
+  otherContainers: []
+
 ## @param nodeSelector Node selector
 nodeSelector: {}
 
