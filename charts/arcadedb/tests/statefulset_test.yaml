@@ -626,6 +626,162 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.defaultDatabases=Universe[admin:pwd]"
 
+  - it: initContainers are omitted by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  - it: config-chown mounts the volume where ArcadeDB does and chowns the config dir
+    set:
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /home/arcadedb/config
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 1
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-chown
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: docker.io/library/busybox:1.37.0
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          value:
+            - name: arcadedb-config
+              mountPath: /home/arcadedb/config
+      - equal:
+          path: spec.template.spec.initContainers[0].command
+          value:
+            - sh
+            - -c
+            - mkdir -p "$1" && chown "$2" "$1"
+            - config-chown
+            - /home/arcadedb/config
+            - "1000:1000"
+
+  - it: config-chown runs as root with only the capabilities it needs
+    set:
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /home/arcadedb/config
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext
+          value:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, DAC_OVERRIDE]
+            seccompProfile:
+              type: RuntimeDefault
+
+  - it: config-chown accepts a mountPath that is a parent of the config dir
+    set:
+      arcadedb.configDirectory: /var/lib/arcadedb/config/
+      securityContext.runAsUser: 2000
+      securityContext.runAsGroup: 3000
+      initContainers.configDirectory.volumeName: arcadedb-state
+      initContainers.configDirectory.mountPath: /var/lib/arcadedb/
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].command[4]
+          value: /var/lib/arcadedb/config
+      - equal:
+          path: spec.template.spec.initContainers[0].command[5]
+          value: "2000:3000"
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts[0].mountPath
+          value: /var/lib/arcadedb/
+
+  - it: config-chown falls back to fsGroup when runAsGroup is unset
+    set:
+      securityContext.runAsGroup: null
+      podSecurityContext.fsGroup: 4000
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /home/arcadedb/config
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].command[5]
+          value: "1000:4000"
+
+  - it: config-chown does not depend on the backup or mcp config maps
+    set:
+      arcadedb.backupConfigMap: backup
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /home/arcadedb/config
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-chown
+
+  - it: config-chown fails when mountPath does not contain the config dir
+    set:
+      arcadedb.configDirectory: /var/lib/arcadedb/config
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /mnt/arcadedb-config
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be arcadedb.configDirectory .* or one of its parent directories"
+
+  - it: config-chown rejects a sibling path that only shares a prefix
+    set:
+      arcadedb.configDirectory: /home/arcadedb/config
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /home/arcadedb/conf
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be arcadedb.configDirectory"
+
+  - it: config-chown requires securityContext.runAsUser
+    set:
+      securityContext.runAsUser: null
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /home/arcadedb/config
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires securityContext.runAsUser"
+
+  - it: config-chown is omitted without a volume name
+    set:
+      arcadedb.backupConfigMap: backup
+      initContainers.configDirectory.mountPath: /home/arcadedb/config
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  - it: custom init containers render after config-chown
+    set:
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /home/arcadedb/config
+      initContainers.otherContainers:
+        - name: wait-for-config
+          image: busybox:1.37.0
+          command: ["sh", "-c", "test -d /home/arcadedb/config"]
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 2
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: wait-for-config
+
+  - it: custom init containers render on their own
+    set:
+      initContainers.otherContainers:
+        - name: custom-init
+          image: busybox:1.37.0
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 1
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: custom-init
+
   # ── config dir ───────────────────────────────────────────────────────────────
 
   - it: config dir is a writable emptyDir by default with no volumeClaimTemplates

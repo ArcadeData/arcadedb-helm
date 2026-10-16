@@ -100,6 +100,18 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `image.tag`        | Overrides the image tag whose default is the chart appVersion.                                                                                                                                   | `""`           |
 | `imagePullSecrets` | This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/ | `[]`           |
 
+### initContainers
+
+| Name                                                  | Description                                                                                                  | Value             |
+|-------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|-------------------|
+| `initContainers.configDirectory.volumeName`           | Name of the volume holding the config directory (e.g. a `volumeClaimTemplates` entry). Empty = no container. | `""`              |
+| `initContainers.configDirectory.mountPath`            | Path that volume is mounted at in the ArcadeDB container: `arcadedb.configDirectory` or one of its parents.  | `""`              |
+| `initContainers.configDirectory.image.registry`       | Registry for the config-chown image                                                                          | `docker.io`       |
+| `initContainers.configDirectory.image.repository`     | Repository for the config-chown image                                                                        | `library/busybox` |
+| `initContainers.configDirectory.image.tag`            | Tag for the config-chown image                                                                               | `1.37.0`          |
+| `initContainers.configDirectory.image.pullPolicy`     | Pull policy for the config-chown image                                                                       | `IfNotPresent`    |
+| `initContainers.otherContainers`                      | Additional init containers, rendered verbatim after config-chown                                             | `[]`              |
+
 ### serviceAccount
 
 | Name                         | Description                                                                                          | Value  |
@@ -376,6 +388,49 @@ under your own names (backups, replication) alongside a matching `volumeMounts` 
 
 If you change `arcadedb.databaseDirectory`, `arcadedb.configDirectory`, `arcadedb.logsDirectory`, or
 `ha.raftStorageDirectory`, update the corresponding `volumeMounts` path to match.
+
+### Config Directory Permissions
+
+ArcadeDB runs as a non-root user. When the config directory lives on a persistent volume, Kubernetes can create
+it owned by root, typically while mounting `backup.json` or `mcp-config.json` (from `arcadedb.backupConfigMap` /
+`arcadedb.mcpConfigMap`) into it. ArcadeDB then cannot write users or server settings and crash-loops.
+
+Set `initContainers.configDirectory.volumeName` to the name of that volume and
+`initContainers.configDirectory.mountPath` to the path it is mounted at in the ArcadeDB container (the
+`mountPath` of its `volumeMounts` entry). The chart then adds a `config-chown` init container that mounts the
+volume at the same path, creates `arcadedb.configDirectory` if it is missing, and chowns it to
+`securityContext.runAsUser:securityContext.runAsGroup` (falling back to `podSecurityContext.fsGroup` for the
+group). It chowns on every start, so it also repairs a directory that is already root-owned. Rendering fails if
+`mountPath` is not `arcadedb.configDirectory` or one of its parents, or if `securityContext.runAsUser` is unset.
+
+```yaml
+volumes:            # drop the arcadedb-config emptyDir
+  - name: arcadedb-data
+    emptyDir: {}
+  - name: arcadedb-logs
+    emptyDir: {}
+  - name: arcadedb-tmp
+    emptyDir: {}
+  - name: arcadedb-raft
+    emptyDir: {}
+volumeClaimTemplates:
+  - metadata:
+      name: arcadedb-config
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: 1Gi
+initContainers:
+  configDirectory:
+    volumeName: arcadedb-config
+    mountPath: /home/arcadedb/config
+```
+
+The container runs as root with all capabilities dropped except `CHOWN` and `DAC_OVERRIDE`, so it is not
+admitted in namespaces enforcing the `restricted` Pod Security Standard. Override
+`initContainers.configDirectory.image` to pull from a private registry. Init containers listed in
+`initContainers.otherContainers` are rendered verbatim after `config-chown`.
 
 ## Console
 
