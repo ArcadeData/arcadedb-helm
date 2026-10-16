@@ -102,19 +102,15 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 
 ### initContainers
 
-### initContainers.configDirectory
-
-| Name                                       | Description                                                      | Value            |
-|--------------------------------------------|------------------------------------------------------------------|------------------|
-| `initContainers.configDirectory.image`     | Image for the generated config-chown init container              | `busybox:latest` |
-| `initContainers.configDirectory.mountPath` | Mount path for the config volume in the generated init container |                  |
-| `initContainers.configDirectory.volumeName`| Volume name mounted by the generated config-chown init container |                  |
-
-### initContainers.otherContainers
-
-| Name                              | Description                             | Value |
-|-----------------------------------|-----------------------------------------|-------|
-| `initContainers.otherContainers`  | Additional user-defined init containers | `[]` |
+| Name                                                  | Description                                                                                                  | Value             |
+|-------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|-------------------|
+| `initContainers.configDirectory.volumeName`           | Name of the volume holding the config directory (e.g. a `volumeClaimTemplates` entry). Empty = no container. | `""`              |
+| `initContainers.configDirectory.mountPath`            | Path that volume is mounted at in the ArcadeDB container: `arcadedb.configDirectory` or one of its parents.  | `""`              |
+| `initContainers.configDirectory.image.registry`       | Registry for the config-chown image                                                                          | `docker.io`       |
+| `initContainers.configDirectory.image.repository`     | Repository for the config-chown image                                                                        | `library/busybox` |
+| `initContainers.configDirectory.image.tag`            | Tag for the config-chown image                                                                               | `1.37.0`          |
+| `initContainers.configDirectory.image.pullPolicy`     | Pull policy for the config-chown image                                                                       | `IfNotPresent`    |
+| `initContainers.otherContainers`                      | Additional init containers, rendered verbatim after config-chown                                             | `[]`              |
 
 ### serviceAccount
 
@@ -394,18 +390,46 @@ If you change `arcadedb.databaseDirectory`, `arcadedb.configDirectory`, `arcaded
 
 ### Config Directory Permissions
 
-ArcadeDB runs as a non-root user, but a newly mounted persistent volume may be owned by root. If ArcadeDB's config
-directory is on that volume, it may not be able to write there. When either `arcadedb.backupConfigMap` or
-`arcadedb.mcpConfigMap` is set, configure `initContainers.configDirectory.volumeName` and
-`initContainers.configDirectory.mountPath` to the values used for the config directory 
-to add an init container that will give the directory to the ArcadeDB user and group configured by
-`securityContext.runAsUser` and `securityContext.runAsGroup`. 
+ArcadeDB runs as a non-root user. When the config directory lives on a persistent volume, Kubernetes can create
+it owned by root, typically while mounting `backup.json` or `mcp-config.json` (from `arcadedb.backupConfigMap` /
+`arcadedb.mcpConfigMap`) into it. ArcadeDB then cannot write users or server settings and crash-loops.
 
-It does not change ownership if the directory already exists. Both settings are required, and the generated container is omitted if neither config map is set.
+Set `initContainers.configDirectory.volumeName` to the name of that volume and
+`initContainers.configDirectory.mountPath` to the path it is mounted at in the ArcadeDB container (the
+`mountPath` of its `volumeMounts` entry). The chart then adds a `config-chown` init container that mounts the
+volume at the same path, creates `arcadedb.configDirectory` if it is missing, and chowns it to
+`securityContext.runAsUser:securityContext.runAsGroup` (falling back to `podSecurityContext.fsGroup` for the
+group). It chowns on every start, so it also repairs a directory that is already root-owned. Rendering fails if
+`mountPath` is not `arcadedb.configDirectory` or one of its parents, or if `securityContext.runAsUser` is unset.
 
-The init container image defaults to `busybox:latest` and can be overridden with
-`initContainers.configDirectory.image`. User-defined init containers in `initContainers.otherContainers` are also
-rendered and follow the ownership container when it is generated.
+```yaml
+volumes:            # drop the arcadedb-config emptyDir
+  - name: arcadedb-data
+    emptyDir: {}
+  - name: arcadedb-logs
+    emptyDir: {}
+  - name: arcadedb-tmp
+    emptyDir: {}
+  - name: arcadedb-raft
+    emptyDir: {}
+volumeClaimTemplates:
+  - metadata:
+      name: arcadedb-config
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: 1Gi
+initContainers:
+  configDirectory:
+    volumeName: arcadedb-config
+    mountPath: /home/arcadedb/config
+```
+
+The container runs as root with all capabilities dropped except `CHOWN` and `DAC_OVERRIDE`, so it is not
+admitted in namespaces enforcing the `restricted` Pod Security Standard. Override
+`initContainers.configDirectory.image` to pull from a private registry. Init containers listed in
+`initContainers.otherContainers` are rendered verbatim after `config-chown`.
 
 ## Console
 

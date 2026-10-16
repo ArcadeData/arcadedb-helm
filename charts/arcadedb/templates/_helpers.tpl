@@ -358,32 +358,51 @@ annotations. Returns YAML (possibly empty).
 {{- end -}}
 
 {{/*
-Merge user-supplied initContainers with the config-chown init container.
-config-chown is generated if config maps are mounted over the config directory on a persistent volume.
+Merge the generated config-chown init container with user-supplied init containers.
+config-chown is generated when initContainers.configDirectory.volumeName and mountPath are set.
+It mounts that volume at the same path as the ArcadeDB container, so arcadedb.configDirectory
+resolves onto the volume, then creates the directory (if missing) and always chowns it to the
+ArcadeDB user. Running before the main container also stops the runtime from creating the
+directory as root when it sets up the backup.json / mcp-config.json subPath mounts.
 Returns YAML (possibly empty).
 */}}
 {{- define "arcadedb.initContainers" -}}
-  {{- if and .Values.initContainers.configDirectory.volumeName .Values.initContainers.configDirectory.mountPath (or .Values.arcadedb.backupConfigMap .Values.arcadedb.mcpConfigMap) -}}
+{{- $cfg := .Values.initContainers.configDirectory -}}
+{{- if and $cfg.volumeName $cfg.mountPath -}}
+{{- $mountPath := trimSuffix "/" $cfg.mountPath -}}
+{{- $configDir := trimSuffix "/" .Values.arcadedb.configDirectory -}}
+{{- if not (or (eq $configDir $mountPath) (hasPrefix (printf "%s/" $mountPath) $configDir)) -}}
+{{- fail (printf "initContainers.configDirectory.mountPath (%s) must be arcadedb.configDirectory (%s) or one of its parent directories: use the path the volume is mounted at in the ArcadeDB container" $cfg.mountPath .Values.arcadedb.configDirectory) -}}
+{{- end -}}
+{{- $uid := required "initContainers.configDirectory requires securityContext.runAsUser to know which user should own the config directory" .Values.securityContext.runAsUser -}}
+{{- $gid := .Values.securityContext.runAsGroup | default (dig "fsGroup" "" (.Values.podSecurityContext | default dict)) | default $uid -}}
+{{- $image := $cfg.image }}
 - name: config-chown
-  image: {{ .Values.initContainers.configDirectory.image }}
+  image: "{{ $image.registry }}/{{ $image.repository }}:{{ $image.tag }}"
+  imagePullPolicy: {{ $image.pullPolicy }}
   securityContext:
-    allowPrivilegeEscalation: false
+    runAsUser: 0
+    runAsGroup: 0
     runAsNonRoot: false
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+      add: [CHOWN, DAC_OVERRIDE]
+    seccompProfile:
+      type: RuntimeDefault
   command:
-    - "sh"
-    - "-c"
-    - |
-      DIR="{{ .Values.arcadedb.configDirectory }}"
-      if [ ! -d "$DIR" ]; then
-        echo "Creating config directory $DIR"
-        mkdir -p "$DIR"
-        chown {{ .Values.securityContext.runAsUser }}:{{ .Values.securityContext.runAsGroup }} "$DIR"
-      fi
+    - sh
+    - -c
+    - mkdir -p "$1" && chown "$2" "$1"
+    - config-chown
+    - {{ $configDir | quote }}
+    - {{ printf "%v:%v" $uid $gid | quote }}
   volumeMounts:
-    - name: {{ .Values.initContainers.configDirectory.volumeName }}
-      mountPath: {{ .Values.initContainers.configDirectory.mountPath }}
-  {{- end -}}
-  {{- with .Values.initContainers.otherContainers }}
-  {{- printf "\n%s" (toYaml .) }}
-  {{- end }}
+    - name: {{ $cfg.volumeName }}
+      mountPath: {{ $cfg.mountPath }}
+{{- end }}
+{{- with .Values.initContainers.otherContainers }}
+{{ toYaml . }}
+{{- end }}
 {{- end -}}
