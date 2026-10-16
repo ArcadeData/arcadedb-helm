@@ -47,7 +47,7 @@ tests:
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].image"
-          value: arcadedata/arcadedb:26.10.1
+          value: arcadedata/arcadedb:26.10.2
 
   - it: image.tag override wins over AppVersion default
     set:
@@ -64,7 +64,7 @@ tests:
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].image"
-          value: my-registry.example.com/arcadedb-fork:26.10.1
+          value: my-registry.example.com/arcadedb-fork:26.10.2
 
   - it: image.pullPolicy default is IfNotPresent and is overridable
     asserts:
@@ -183,7 +183,9 @@ tests:
     set:
       tls.enabled: true
       tls.bolt: REQUIRED
+      tls.postgres: REQUIRED
       arcadedb.plugins.bolt.enabled: true
+      arcadedb.plugins.postgres.enabled: true
     asserts:
       - contains:
           path: spec.template.spec.containers[0].ports
@@ -209,6 +211,64 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.bolt.ssl=REQUIRED"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.postgres.ssl=REQUIRED"
+
+  - it: postgres TLS defaults to DISABLED when TLS and the postgres plugin are enabled
+    set:
+      tls.enabled: true
+      arcadedb.plugins.postgres.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.postgres.ssl=DISABLED"
+
+  - it: TLS modes are normalised to upper case
+    set:
+      tls.enabled: true
+      tls.postgres: optional
+      arcadedb.plugins.postgres.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.postgres.ssl=OPTIONAL"
+
+  - it: plugin TLS flags are omitted when their plugin is disabled
+    set:
+      tls.enabled: true
+      tls.postgres: REQUIRED
+      arcadedb.plugins.postgres.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.postgres.ssl=REQUIRED"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.bolt.ssl=OPTIONAL"
+
+  - it: plugin TLS flags are omitted when TLS is disabled
+    set:
+      tls.postgres: REQUIRED
+      tls.bolt: REQUIRED
+      arcadedb.plugins.postgres.enabled: true
+      arcadedb.plugins.bolt.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.postgres.ssl=REQUIRED"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.bolt.ssl=REQUIRED"
+
+  - it: an invalid plugin TLS mode fails rendering
+    set:
+      tls.enabled: true
+      tls.postgres: REQUIERED
+      arcadedb.plugins.postgres.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "tls.postgres must be DISABLED, OPTIONAL or REQUIRED"
 
   - it: TLS volume mount uses the configured path and secret
     set:
@@ -571,6 +631,8 @@ tests:
   - it: extra volumeMounts flow through
     set:
       volumeMounts:
+        - name: arcadedb-config
+          mountPath: /home/arcadedb/config
         - name: config
           mountPath: /etc/arcadedb
     asserts:
@@ -593,8 +655,11 @@ tests:
           path: spec.volumeClaimTemplates[0].metadata.name
           value: arcadedb-backups
 
-  - it: command includes default databaseDirectory and defaultDatabases flags
+  - it: command includes default configDirectory, databaseDirectory and defaultDatabases flags
     asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.configDirectory=/home/arcadedb/config"
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.databaseDirectory=/home/arcadedb/databases"
@@ -602,17 +667,58 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.defaultDatabases="
 
-  - it: arcadedb.databaseDirectory and defaultDatabases flow through
+  - it: arcadedb.configDirectory, arcadedb.databaseDirectory and defaultDatabases flow through
     set:
+      arcadedb.configDirectory: /custom/config
       arcadedb.databaseDirectory: /custom/dir
       arcadedb.defaultDatabases: "Universe[admin:pwd]"
+      volumeMounts:
+        - name: arcadedb-config
+          mountPath: /custom/config
     asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.configDirectory=/custom/config"
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.databaseDirectory=/custom/dir"
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.defaultDatabases=Universe[admin:pwd]"
+
+  - it: a configDirectory outside every volumeMounts entry fails under readOnlyRootFilesystem
+    set:
+      arcadedb.configDirectory: /custom/config
+    asserts:
+      - failedTemplate:
+          errorPattern: "arcadedb.configDirectory \\(/custom/config\\) is not on any volumeMounts entry"
+
+  - it: a configDirectory under a mounted parent directory is accepted
+    set:
+      arcadedb.configDirectory: /data/arcadedb/config
+      volumeMounts:
+        - name: arcadedb-config
+          mountPath: /data/arcadedb
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.configDirectory=/data/arcadedb/config"
+
+  - it: a configDirectory sharing only a name prefix with a mount fails
+    set:
+      arcadedb.configDirectory: /home/arcadedb/configuration
+    asserts:
+      - failedTemplate:
+          errorPattern: "is not on any volumeMounts entry"
+
+  - it: an unmounted configDirectory is allowed with a writable root filesystem
+    set:
+      arcadedb.configDirectory: /custom/config
+      securityContext.readOnlyRootFilesystem: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.configDirectory=/custom/config"
 
   - it: initContainers are omitted by default
     asserts:
@@ -674,6 +780,9 @@ tests:
       securityContext.runAsGroup: 3000
       initContainers.configDirectory.volumeName: arcadedb-state
       initContainers.configDirectory.mountPath: /var/lib/arcadedb/
+      volumeMounts:
+        - name: arcadedb-state
+          mountPath: /var/lib/arcadedb/
     asserts:
       - equal:
           path: spec.template.spec.initContainers[0].command[4]
@@ -825,6 +934,9 @@ tests:
       arcadedb.configDirectory: /custom/config
       arcadedb.backupConfigMap: backup
       arcadedb.mcpConfigMap: mcp
+      volumeMounts:
+        - name: arcadedb-config
+          mountPath: /custom/config
     asserts:
       - contains:
           path: spec.template.spec.containers[0].volumeMounts

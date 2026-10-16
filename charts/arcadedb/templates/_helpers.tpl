@@ -297,8 +297,14 @@ TLS parameters. Store passwords come from the TLS_STORE_PASSWORD env var
 {{- if .Values.tls.enabled }}
 - -Darcadedb.ssl.enabled=true
 - -Darcadedb.server.httpsIncomingPort={{ .Values.service.https.port }}
-  {{- if and (hasKey .Values.arcadedb.plugins "bolt") .Values.arcadedb.plugins.bolt.enabled }}
-- -Darcadedb.bolt.ssl={{ .Values.tls.bolt }}
+  {{- range $plugin := list "bolt" "postgres" }}
+    {{- if (get ($.Values.arcadedb.plugins | default dict) $plugin | default dict).enabled }}
+      {{- $mode := upper (toString (get $.Values.tls $plugin)) }}
+      {{- if not (has $mode (list "DISABLED" "OPTIONAL" "REQUIRED")) }}
+        {{- fail (printf "tls.%s must be DISABLED, OPTIONAL or REQUIRED (got %q)" $plugin (toString (get $.Values.tls $plugin))) }}
+      {{- end }}
+- -Darcadedb.{{ $plugin }}.ssl={{ $mode }}
+    {{- end }}
   {{- end }}
   {{- $keyStoreKey := .Values.tls.secretRef.keyStore.key }}
   {{- $trustStoreKey := .Values.tls.secretRef.trustStore.key }}
@@ -317,6 +323,27 @@ TLS parameters. Store passwords come from the TLS_STORE_PASSWORD env var
 - -Darcadedb.ssl.trustStore={{ printf "%s/%s" .Values.tls.mountPath $trustStoreKey }}
 - -Darcadedb.ssl.trustStorePassword=$(TLS_STORE_PASSWORD)
 {{- end }}
+{{- end -}}
+
+{{/*
+Guard: the server writes users, groups and tokens to arcadedb.configDirectory. Under
+readOnlyRootFilesystem that path must be backed by one of the volumeMounts, which are
+rendered verbatim and do not follow configDirectory on their own.
+*/}}
+{{- define "arcadedb.configDirectory.validate" -}}
+{{- if (.Values.securityContext | default dict).readOnlyRootFilesystem -}}
+{{- $configDir := trimSuffix "/" .Values.arcadedb.configDirectory -}}
+{{- $mounted := false -}}
+{{- range .Values.volumeMounts -}}
+{{- $mountPath := trimSuffix "/" (toString .mountPath) -}}
+{{- if or (eq $configDir $mountPath) (hasPrefix (printf "%s/" $mountPath) $configDir) -}}
+{{- $mounted = true -}}
+{{- end -}}
+{{- end -}}
+{{- if not $mounted -}}
+{{- fail (printf "arcadedb.configDirectory (%s) is not on any volumeMounts entry, so the server cannot write users or tokens under readOnlyRootFilesystem: update the arcadedb-config mountPath in volumeMounts to match" .Values.arcadedb.configDirectory) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

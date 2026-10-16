@@ -181,8 +181,12 @@ tls:
   ## @param tls.enabled Enable TLS
   enabled: false
 
-  ## @param tls.bolt Bolt TLS option. OPTIONAL or REQUIRED
+  ## @param tls.bolt Bolt TLS mode when the bolt plugin is enabled: DISABLED, OPTIONAL or REQUIRED
   bolt: OPTIONAL
+
+  ## @param tls.postgres Postgres TLS mode when the postgres plugin is enabled: DISABLED, OPTIONAL or REQUIRED.
+  ## Defaults to DISABLED, the server default, so enabling tls does not change existing Postgres clients.
+  postgres: DISABLED
 
   ## @param tls.mountPath Path where TLS certificates are mounted in the container.
   mountPath: /etc/certs/arcadedb

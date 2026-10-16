@@ -154,7 +154,8 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | Name                              | Description                                      | Value                  |
 |-----------------------------------|--------------------------------------------------|------------------------|
 | `tls.enabled`                     | Enable TLS and mount the certificate Secret     | `false`                |
-| `tls.bolt`                        | Bolt TLS mode: OPTIONAL or REQUIRED             | `OPTIONAL`             |
+| `tls.bolt`                        | Bolt TLS mode: DISABLED, OPTIONAL or REQUIRED   | `OPTIONAL`             |
+| `tls.postgres`                    | PostgreSQL TLS mode: DISABLED, OPTIONAL or REQUIRED | `DISABLED`         |
 | `tls.mountPath`                   | Certificate mount path inside the container     | `/etc/certs/arcadedb`  |
 | `tls.secretRef.name`              | Secret containing TLS certificates (`""` = `<fullname>-tls`) | `""`      |
 | `tls.secretRef.passwordSecret.name` | Secret holding the store password (`""` = root password secret) | `""` |
@@ -387,6 +388,10 @@ under your own names (backups, replication) alongside a matching `volumeMounts` 
 
 If you change `arcadedb.databaseDirectory`, `arcadedb.configDirectory`, `arcadedb.logsDirectory`, or
 `ha.raftStorageDirectory`, update the corresponding `volumeMounts` path to match.
+`arcadedb.configDirectory` is passed to the server as `-Darcadedb.server.configDirectory`, which needs ArcadeDB
+26.10.1 or later: an older `image.tag` ignores it and keeps using `<rootPath>/config`. With
+`readOnlyRootFilesystem` enabled, rendering fails if no `volumeMounts` entry covers that directory. A relocated
+config directory starts empty apart from what the server writes itself (users, groups, tokens).
 
 ### Config Directory Permissions
 
