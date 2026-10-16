@@ -240,3 +240,20 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+
+  - it: a null plugins map fails with the prometheus guard message, not a nil pointer (#32)
+    values:
+      - values/null-plugins.yaml
+    set:
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+
+  - it: a null prometheus entry fails with the prometheus guard message (#32)
+    set:
+      arcadedb.plugins.prometheus: null
+      observability.metrics.prometheus.serviceMonitor.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"

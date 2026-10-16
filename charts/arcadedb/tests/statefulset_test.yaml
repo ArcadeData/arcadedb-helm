@@ -1085,3 +1085,29 @@ tests:
           content:
             name: arcadedb-raft
             emptyDir: {}
+
+  # ── null plugin entries (#32) ────────────────────────────────────────────────
+
+  - it: a null plugin entry is treated as disabled in the startup flags
+    set:
+      arcadedb.plugins.postgres: null
+      arcadedb.plugins.gremlin.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.plugins=GremlinServer:com.arcadedb.server.gremlin.GremlinServerPlugin"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.postgres.port=5432"
+
+  - it: a null plugin entry does not break TLS rendering
+    set:
+      tls.enabled: true
+      arcadedb.plugins.postgres: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.enabled=true"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.postgres.ssl=DISABLED"

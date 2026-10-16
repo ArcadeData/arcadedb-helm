@@ -108,9 +108,12 @@ endpoints explicit instead of relying on ArcadeDB's local-port fallback.
 
 {{/*
 Preparing a list of plugin ports to build plugin configurations.
+A plugin entry left empty (null) is treated as disabled; the plugin
+parameters, service and networkPolicy helpers build on this output.
 */}}
 {{- define "_arcadedb.plugin.ports" -}}
-  {{- range $plugin, $config := .Values.arcadedb.plugins -}}
+  {{- range $plugin, $entry := .Values.arcadedb.plugins | default dict -}}
+    {{- $config := $entry | default dict }}
     {{- if $config.enabled }}
       {{- $port := int 0}}
       {{- if eq $plugin "bolt" }}
@@ -356,7 +359,7 @@ prometheus plugin so /prometheus is actually served.
 {{- $podAnnotations := $p.podAnnotations | default dict -}}
 {{- if or $serviceMonitor.enabled $podAnnotations.enabled -}}
   {{- $promEnabled := false -}}
-  {{- with .Values.arcadedb.plugins.prometheus -}}
+  {{- with (.Values.arcadedb.plugins | default dict).prometheus -}}
     {{- if .enabled -}}{{- $promEnabled = true -}}{{- end -}}
   {{- end -}}
   {{- if not $promEnabled -}}
