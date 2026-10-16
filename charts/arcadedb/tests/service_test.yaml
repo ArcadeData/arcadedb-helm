@@ -209,3 +209,16 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: "service.http.type must be ClusterIP when service.external.enabled is true (the external service replaces it)"
+
+  - it: a null plugin entry adds no port to the headless service (#32)
+    set:
+      arcadedb.plugins.postgres: null
+      arcadedb.plugins.gremlin.enabled: true
+    documentIndex: 1
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 8182, targetPort: 8182, protocol: TCP, name: gremlin-port }
+      - notContains:
+          path: spec.ports
+          content: { port: 5432, targetPort: 5432, protocol: TCP, name: postgres-port }

@@ -105,3 +105,17 @@ tests:
       - equal:
           path: spec.ingress[0].ports[0].port
           value: 5555
+
+  - it: a null plugin entry opens no port in the network policy (#32)
+    set:
+      networkPolicy.enabled: true
+      arcadedb.plugins.postgres: null
+      arcadedb.plugins.gremlin.enabled: true
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.ingress[0].ports
+          content: { port: 8182, protocol: TCP }
+      - notContains:
+          path: spec.ingress[0].ports
+          content: { port: 5432, protocol: TCP }
