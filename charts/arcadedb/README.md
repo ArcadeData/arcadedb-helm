@@ -97,8 +97,31 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `image.registry`   | Registry for image                                                                                                                                                                               | `arcadedata`   |
 | `image.repository` | Image repo                                                                                                                                                                                       | `arcadedb`     |
 | `image.pullPolicy` | This sets the pull policy for images.                                                                                                                                                            | `IfNotPresent` |
-| `image.tag`        | Overrides the image tag whose default is the chart appVersion.                                                                                                                                   | `""`           |
+| `image.tag`        | Overrides the image tag whose default is the chart appVersion (`<appVersion>-native` when `image.flavor=native`).                                                                                | `""`           |
+| `image.flavor`     | `jvm` or `native` (experimental GraalVM native binary). See [Native image](#native-image).                                                                                                       | `jvm`          |
 | `imagePullSecrets` | This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/ | `[]`           |
+
+#### Native image
+
+ArcadeDB also publishes an experimental GraalVM native build of the server
+(`arcadedata/arcadedb:<version>-native`, multi-arch). It starts faster and uses
+less memory than the JVM image. Select it with:
+
+```bash
+helm install my-arcadedb arcadedb/arcadedb --set image.flavor=native
+```
+
+The native image has no shell, so the chart starts `bin/arcadedb` directly instead
+of `bin/server.sh`. Compared with the JVM flavor:
+
+- Gremlin is not included, and custom plugin classes cannot be loaded. Enabling
+  `arcadedb.plugins.gremlin` or a plugin with a `class:` fails the render.
+- Environment variables that only `server.sh` reads (`JAVA_OPTS`,
+  `ARCADEDB_OPTS_MEMORY`, `ARCADEDB_SETTINGS`) have no effect. Pass `-D` and heap
+  flags through `arcadedb.extraCommands`, e.g. `-Xmx2g`.
+- `bin/console.sh` and `kubectl exec ... sh` are not available in the pod.
+- When you set `image.tag` yourself, choose the `image.flavor` that matches it
+  (e.g. `image.tag=latest-native` with `image.flavor=native`).
 
 ### initContainers
 

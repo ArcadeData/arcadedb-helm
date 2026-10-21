@@ -40,3 +40,8 @@ jobs:
 
   integration:
     uses: ./.github/workflows/integration-reusable.yml
+
+  integration-native:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      flavor: native

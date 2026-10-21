@@ -1,0 +1,143 @@
+suite: Native image flavor
+templates:
+  - statefulset.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  - it: jvm flavor (default) keeps bin/server.sh and the plain appVersion tag
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command[0]
+          value: bin/server.sh
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: arcadedata/arcadedb:26.10.2
+
+  - it: native flavor defaults the tag to <appVersion>-native
+    set:
+      image.flavor: native
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: arcadedata/arcadedb:26.10.2-native
+
+  - it: native flavor leaves an explicit image.tag untouched
+    set:
+      image.flavor: native
+      image.tag: latest-native
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: arcadedata/arcadedb:latest-native
+
+  - it: native flavor runs the binary directly with the image entrypoint flags
+    set:
+      image.flavor: native
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command[0]
+          value: /home/arcadedb/bin/arcadedb
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Duser.home=/home/arcadedb
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Dorg.jline.terminal.dumb=true
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Djava.util.logging.config.file=/home/arcadedb/config/arcadedb-log.properties
+
+  - it: native flavor passes the logs directory as a -D argument
+    set:
+      image.flavor: native
+      arcadedb.logsDirectory: /data/log
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.logsDirectory=/data/log
+
+  - it: native flavor keeps the shared server arguments
+    set:
+      image.flavor: native
+      replicaCount: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.name=$(HOSTNAME)
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.enabled=true
+
+  - it: native flavor drops the console -Duser.dir pin
+    set:
+      image.flavor: native
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Duser.dir=/home/arcadedb
+
+  - it: native flavor drops the server.sh-only environment variables
+    set:
+      image.flavor: native
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content: { name: ARCADEDB_SETTINGS }
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content: { name: ARCADEDB_LOG_DIR }
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content: { name: ARCADEDB_PID }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: XDG_CACHE_HOME, value: /tmp/.cache }
+
+  - it: native flavor accepts plugins bundled in the binary
+    set:
+      image.flavor: native
+      arcadedb.plugins:
+        bolt: { enabled: true }
+        postgres: { enabled: true }
+        prometheus: { enabled: true }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.plugins=Bolt:com.arcadedb.bolt.BoltProtocolPlugin,Postgres:com.arcadedb.postgres.PostgresProtocolPlugin,Prometheus:com.arcadedb.metrics.prometheus.PrometheusMetricsPlugin
+
+  - it: native flavor refuses the gremlin plugin
+    set:
+      image.flavor: native
+      arcadedb.plugins:
+        gremlin: { enabled: true }
+    asserts:
+      - failedTemplate:
+          errorMessage: "The gremlin plugin is not included in the native image (image.flavor=native). Disable arcadedb.plugins.gremlin or use image.flavor=jvm."
+
+  - it: native flavor ignores a disabled gremlin entry
+    set:
+      image.flavor: native
+      arcadedb.plugins:
+        gremlin: { enabled: false }
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: native flavor refuses custom plugin classes
+    set:
+      image.flavor: native
+      arcadedb.plugins:
+        myPlugin: { enabled: true, port: 1234, class: com.example.MyPlugin }
+    asserts:
+      - failedTemplate:
+          errorMessage: "Custom plugin 'myPlugin' cannot be loaded by the native image (image.flavor=native): the binary has no classpath for extra plugin jars. Disable it or use image.flavor=jvm."
+
+  - it: rejects an unknown flavor
+    set:
+      image.flavor: graal
+    asserts:
+      - failedTemplate:
+          errorMessage: "image.flavor must be 'jvm' or 'native', got 'graal'."

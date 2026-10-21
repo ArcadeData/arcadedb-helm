@@ -16,3 +16,10 @@ jobs:
     with:
       imageTag: latest
       pullPolicy: Always
+
+  integration-latest-native:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      imageTag: latest-native
+      pullPolicy: Always
+      flavor: native
