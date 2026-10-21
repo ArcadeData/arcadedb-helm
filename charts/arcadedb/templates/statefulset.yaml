@@ -1,5 +1,6 @@
 {{- include "arcadedb.observability.validate" . -}}
 {{- include "arcadedb.configDirectory.validate" . -}}
+{{- $native := include "arcadedb.native" . -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -54,7 +55,7 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "arcadedb.image.tag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -69,8 +70,24 @@ spec:
               containerPort: {{ .Values.service.rpc.port }}
               protocol: TCP
           command:
+            {{- if $native }}
+            {{- /*
+              The native images (scratch/distroless) have no shell, so there is no
+              server.sh to wrap the binary. Replacing the image ENTRYPOINT drops its
+              flags, so they are repeated here, and the log directory server.sh would
+              derive from ARCADEDB_LOG_DIR is passed directly.
+            */}}
+            - {{ .Values.arcadedb.installDirectory }}/bin/arcadedb
+            - -Duser.home={{ .Values.arcadedb.installDirectory }}
+            - -Dorg.jline.terminal.dumb=true
+            - -Djava.util.logging.config.file={{ .Values.arcadedb.installDirectory }}/config/arcadedb-log.properties
+            {{- with .Values.arcadedb.logsDirectory }}
+            - -Darcadedb.server.logsDirectory={{ . }}
+            {{- end }}
+            {{- else }}
             - bin/server.sh
-            {{- if .Values.arcadedb.consoleWorkingDirectory }}
+            {{- end }}
+            {{- if and (not $native) .Values.arcadedb.consoleWorkingDirectory }}
             {{- /*
               ARCADEDB_SETTINGS (below) moves the JVM working directory so the
               interactive console can write its history file under a read-only
@@ -156,11 +173,15 @@ spec:
                   name: arcadedb-credentials-secret
                   key: rootPassword
               {{- end }}
+            {{- if not $native }}
             - name: ARCADEDB_LOG_DIR
               value: {{ .Values.arcadedb.logsDirectory | quote }}
+            {{- end }}
             {{- with .Values.arcadedb.tmpDirectory }}
+            {{- if not $native }}
             - name: ARCADEDB_PID
               value: {{ printf "%s/arcadedb.pid" . | quote }}
+            {{- end }}
             - name: XDG_CACHE_HOME
               value: {{ printf "%s/.cache" . | quote }}
             {{- end }}
@@ -171,9 +192,11 @@ spec:
                   name: {{ include "arcadedb.tls.passwordSecretName" . }}
                   key: {{ include "arcadedb.tls.passwordSecretKey" . }}
             {{- end }}
+            {{- if not $native }}
             {{- with .Values.arcadedb.consoleWorkingDirectory }}
             - name: ARCADEDB_SETTINGS
               value: {{ printf "-Duser.dir=%s" . | quote }}
+            {{- end }}
             {{- end }}
             {{- with .Values.arcadedb.extraEnvironment }}
             {{- toYaml . | nindent 12 }}

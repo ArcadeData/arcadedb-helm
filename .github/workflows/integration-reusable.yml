@@ -11,6 +11,10 @@ on:
         description: "Image pull policy (IfNotPresent for pinned, Always for rolling tags)."
         type: string
         default: "IfNotPresent"
+      flavor:
+        description: "image.flavor to install (jvm or native)."
+        type: string
+        default: "jvm"
 
 permissions:
   contents: read
@@ -49,7 +53,7 @@ jobs:
       - name: Log image digest under test
         if: inputs.imageTag != ''
         run: |
-          echo "Testing image arcadedata/arcadedb:${{ inputs.imageTag }}"
+          echo "Testing image arcadedata/arcadedb:${{ inputs.imageTag }} (flavor ${{ inputs.flavor }})"
           docker buildx imagetools inspect "arcadedata/arcadedb:${{ inputs.imageTag }}" || true
 
       - name: Create kind cluster
@@ -63,10 +67,13 @@ jobs:
             --set arcadedb.defaultDatabases="" \
             --set image.tag="${{ inputs.imageTag }}" \
             --set image.pullPolicy="${{ inputs.pullPolicy }}" \
+            --set image.flavor="${{ inputs.flavor }}" \
             --timeout 5m \
             --wait
 
       - name: Run integration tests
+        env:
+          IMAGE_FLAVOR: ${{ inputs.flavor }}
         run: make test-integration
 
       - name: Delete kind cluster

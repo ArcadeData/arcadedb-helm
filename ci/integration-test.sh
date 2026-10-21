@@ -6,6 +6,8 @@ NAMESPACE=default
 HTTP_PORT=2480
 RAFT_TIMEOUT=60
 ROLLOUT_TIMEOUT=120
+# image.flavor the chart was installed with (jvm|native).
+IMAGE_FLAVOR=${IMAGE_FLAVOR:-jvm}
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -284,59 +286,65 @@ LEADER_ORDINAL=$NEW_LEADER_ORDINAL
 
 # ── phase 8: console history under readOnlyRootFilesystem (issue #22) ─────────
 
-echo "==> [8/8] Asserting the console can write its history file..."
-POD="${RELEASE}-0"
-
-# bin/console.sh asks JLine for the relative history file ".history", resolved
-# against the JVM working directory. The chart moves that directory to a writable
-# volume through ARCADEDB_SETTINGS; without it the console writes into the
-# read-only image install directory and warns on every command.
-CONSOLE_SETTINGS=$(kubectl exec -n "$NAMESPACE" "$POD" -- \
-  sh -c 'printf %s "${ARCADEDB_SETTINGS:-}"')
-
-case "$CONSOLE_SETTINGS" in
-  *-Duser.dir=*) ;;
-  *) echo "ERROR: ARCADEDB_SETTINGS carries no -Duser.dir (got '${CONSOLE_SETTINGS:-<unset>}')"
-     exit 1 ;;
-esac
-
-CONSOLE_DIR=${CONSOLE_SETTINGS##*-Duser.dir=}
-CONSOLE_DIR=${CONSOLE_DIR%% *}
-echo "    Console working directory: ${CONSOLE_DIR}"
-
-# The exec session is the console's launch context, so probe from there.
-kubectl exec -n "$NAMESPACE" "$POD" -- \
-  sh -c "cd '${CONSOLE_DIR}' && touch .history && rm -f .history" || {
-  echo "ERROR: ${CONSOLE_DIR}/.history is not writable - the console would fail to save history"
-  exit 1
-}
-echo "    ${CONSOLE_DIR}/.history is writable."
-
-# The default working directory (image WORKDIR) must stay read-only: that is the
-# hardening this phase exists to keep honest.
-if kubectl exec -n "$NAMESPACE" "$POD" -- \
-     sh -c 'touch .history-probe 2>/dev/null && rm -f .history-probe' 2>/dev/null; then
-  echo "    WARNING: the image install directory is writable; readOnlyRootFilesystem is off."
+if [[ "$IMAGE_FLAVOR" == "native" ]]; then
+  # The native image has no shell and no bin/console.sh, and the chart sets no
+  # ARCADEDB_SETTINGS for it, so there is nothing for this phase to exercise.
+  echo "==> [8/8] Skipped: the native image has no shell or console."
 else
-  echo "    Image install directory is read-only, as expected."
+  echo "==> [8/8] Asserting the console can write its history file..."
+  POD="${RELEASE}-0"
+
+  # bin/console.sh asks JLine for the relative history file ".history", resolved
+  # against the JVM working directory. The chart moves that directory to a writable
+  # volume through ARCADEDB_SETTINGS; without it the console writes into the
+  # read-only image install directory and warns on every command.
+  CONSOLE_SETTINGS=$(kubectl exec -n "$NAMESPACE" "$POD" -- \
+    sh -c 'printf %s "${ARCADEDB_SETTINGS:-}"')
+
+  case "$CONSOLE_SETTINGS" in
+    *-Duser.dir=*) ;;
+    *) echo "ERROR: ARCADEDB_SETTINGS carries no -Duser.dir (got '${CONSOLE_SETTINGS:-<unset>}')"
+       exit 1 ;;
+  esac
+
+  CONSOLE_DIR=${CONSOLE_SETTINGS##*-Duser.dir=}
+  CONSOLE_DIR=${CONSOLE_DIR%% *}
+  echo "    Console working directory: ${CONSOLE_DIR}"
+
+  # The exec session is the console's launch context, so probe from there.
+  kubectl exec -n "$NAMESPACE" "$POD" -- \
+    sh -c "cd '${CONSOLE_DIR}' && touch .history && rm -f .history" || {
+    echo "ERROR: ${CONSOLE_DIR}/.history is not writable - the console would fail to save history"
+    exit 1
+  }
+  echo "    ${CONSOLE_DIR}/.history is writable."
+
+  # The default working directory (image WORKDIR) must stay read-only: that is the
+  # hardening this phase exists to keep honest.
+  if kubectl exec -n "$NAMESPACE" "$POD" -- \
+       sh -c 'touch .history-probe 2>/dev/null && rm -f .history-probe' 2>/dev/null; then
+    echo "    WARNING: the image install directory is writable; readOnlyRootFilesystem is off."
+  else
+    echo "    Image install directory is read-only, as expected."
+  fi
+
+  # The server process keeps the working directory it has always had, so its own
+  # relative path resolution (config/, backups/) is untouched by the console fix.
+  kubectl exec -n "$NAMESPACE" "$POD" -- \
+    sh -c 'tr "\0" "\n" </proc/1/cmdline' | grep -qx -- "-Duser.dir=/home/arcadedb" || {
+    echo "ERROR: server process is not pinned to -Duser.dir=/home/arcadedb"
+    exit 1
+  }
+  echo "    Server process pinned to /home/arcadedb."
+
+  # Finally, the console itself must still start with those settings applied.
+  CONSOLE_OUT=$(kubectl exec -n "$NAMESPACE" "$POD" -- bin/console.sh "help" 2>&1) || {
+    echo "ERROR: bin/console.sh failed to run inside the pod"
+    echo "$CONSOLE_OUT"
+    exit 1
+  }
+  echo "    bin/console.sh runs inside the pod."
 fi
-
-# The server process keeps the working directory it has always had, so its own
-# relative path resolution (config/, backups/) is untouched by the console fix.
-kubectl exec -n "$NAMESPACE" "$POD" -- \
-  sh -c 'tr "\0" "\n" </proc/1/cmdline' | grep -qx -- "-Duser.dir=/home/arcadedb" || {
-  echo "ERROR: server process is not pinned to -Duser.dir=/home/arcadedb"
-  exit 1
-}
-echo "    Server process pinned to /home/arcadedb."
-
-# Finally, the console itself must still start with those settings applied.
-CONSOLE_OUT=$(kubectl exec -n "$NAMESPACE" "$POD" -- bin/console.sh "help" 2>&1) || {
-  echo "ERROR: bin/console.sh failed to run inside the pod"
-  echo "$CONSOLE_OUT"
-  exit 1
-}
-echo "    bin/console.sh runs inside the pod."
 
 # Phases 9 (helm-upgrade scale-up 3->5) and 10 (snapshot-install recovery) were
 # planned but discarded after CI proved the scenarios are not supported by the

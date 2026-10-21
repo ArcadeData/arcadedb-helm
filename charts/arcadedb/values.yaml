@@ -102,8 +102,15 @@ image:
   repository: arcadedb
   ## @param image.pullPolicy Image pull policy
   pullPolicy: IfNotPresent
-  ## @param image.tag Image tag. Defaults to chart appVersion.
+  ## @param image.tag Image tag. Defaults to chart appVersion (with a -native suffix when image.flavor=native).
   tag: ""
+  ## @param image.flavor Image flavor: "jvm" (default) or "native" (experimental GraalVM native binary).
+  ## The native image has no shell, so the chart starts bin/arcadedb directly instead of bin/server.sh.
+  ## It bundles no Gremlin and cannot load custom plugin classes; enabling either fails the render.
+  ## Environment variables read by server.sh (JAVA_OPTS, ARCADEDB_OPTS_MEMORY, ARCADEDB_SETTINGS)
+  ## have no effect on it: pass heap flags such as -Xmx2g through arcadedb.extraCommands instead.
+  ## When setting image.tag yourself, pick the flavor that matches it.
+  flavor: jvm
 
 ## @param imagePullSecrets Secrets for pulling from private registries
 imagePullSecrets: []

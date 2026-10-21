@@ -32,3 +32,17 @@ NOTE: The container root filesystem is read-only by default (securityContext.rea
       If you add sidecars/init containers or custom paths that write to the root filesystem, either mount a
       writable volume for them or set securityContext.readOnlyRootFilesystem=false.
 {{- end }}
+{{- if include "arcadedb.native" . }}
+{{- $ignored := list }}
+{{- range .Values.arcadedb.extraEnvironment }}
+{{- if has .name (list "JAVA_OPTS" "ARCADEDB_OPTS_MEMORY" "ARCADEDB_SETTINGS") }}
+{{- $ignored = append $ignored .name }}
+{{- end }}
+{{- end }}
+{{- with $ignored }}
+
+WARNING: arcadedb.extraEnvironment sets {{ join ", " . }}, which only bin/server.sh reads.
+         The native image (image.flavor=native) starts bin/arcadedb directly, so these have no effect.
+         Pass -D and heap flags (e.g. -Xmx2g) through arcadedb.extraCommands instead.
+{{- end }}
+{{- end }}

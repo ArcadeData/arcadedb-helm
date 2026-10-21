@@ -49,3 +49,22 @@ tests:
       - notMatchRegex:
           path: raw
           pattern: "WARNING: persistence.enabled is false"
+
+  - it: warns that server.sh env vars are ignored by the native image
+    set:
+      image.flavor: native
+      arcadedb.extraEnvironment:
+        - { name: JAVA_OPTS, value: "-Xmx2g" }
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: arcadedb.extraEnvironment sets JAVA_OPTS"
+
+  - it: does not warn about server.sh env vars on the jvm image
+    set:
+      arcadedb.extraEnvironment:
+        - { name: JAVA_OPTS, value: "-Xmx2g" }
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "WARNING: arcadedb.extraEnvironment sets"

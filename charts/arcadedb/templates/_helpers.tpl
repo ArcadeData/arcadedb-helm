@@ -63,6 +63,32 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Returns "true" when image.flavor selects the GraalVM native image, "" for the
+JVM image. Fails on any other flavor so a typo cannot silently fall back to jvm.
+*/}}
+{{- define "arcadedb.native" -}}
+{{- $flavor := .Values.image.flavor | default "jvm" -}}
+{{- if not (has $flavor (list "jvm" "native")) -}}
+  {{- fail (printf "image.flavor must be 'jvm' or 'native', got '%s'." $flavor) -}}
+{{- end -}}
+{{- if eq $flavor "native" -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Image tag: image.tag when set, else the chart appVersion, suffixed with
+-native for the native flavor (the upstream multi-arch native manifest).
+*/}}
+{{- define "arcadedb.image.tag" -}}
+{{- if .Values.image.tag -}}
+{{- .Values.image.tag -}}
+{{- else if include "arcadedb.native" . -}}
+{{- printf "%s-native" .Chart.AppVersion -}}
+{{- else -}}
+{{- .Chart.AppVersion -}}
+{{- end -}}
+{{- end }}
+
+{{/*
  Creates kubernetes naming suffix.
 */}}
 {{- define "arcadedb.k8sSuffix" -}}
@@ -112,9 +138,22 @@ A plugin entry left empty (null) is treated as disabled; the plugin
 parameters, service and networkPolicy helpers build on this output.
 */}}
 {{- define "_arcadedb.plugin.ports" -}}
+  {{- $native := include "arcadedb.native" . -}}
   {{- range $plugin, $entry := .Values.arcadedb.plugins | default dict -}}
     {{- $config := $entry | default dict }}
     {{- if $config.enabled }}
+      {{- if $native }}
+        {{/*
+        The native binary bundles a fixed module set: Gremlin is left out of it and
+        there is no classpath to load extra plugin jars from. The server would skip
+        such a plugin without a log line, so refuse to render instead.
+        */}}
+        {{- if eq $plugin "gremlin" }}
+          {{- fail "The gremlin plugin is not included in the native image (image.flavor=native). Disable arcadedb.plugins.gremlin or use image.flavor=jvm." -}}
+        {{- else if not (has $plugin (list "bolt" "postgres" "mongo" "redis" "prometheus")) }}
+          {{- fail (printf "Custom plugin '%s' cannot be loaded by the native image (image.flavor=native): the binary has no classpath for extra plugin jars. Disable it or use image.flavor=jvm." $plugin) -}}
+        {{- end }}
+      {{- end }}
       {{- $port := int 0}}
       {{- if eq $plugin "bolt" }}
         {{- $port = default 7687 $config.port }}
