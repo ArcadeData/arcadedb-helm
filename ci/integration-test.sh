@@ -145,14 +145,14 @@ PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
-echo "==> [1/8] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
+echo "==> [1/9] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
 echo "    All 3 pods Ready."
 
 # ── phase 2: liveness health probe ────────────────────────────────────────────
 
-echo "==> [2/8] Asserting /api/v1/health liveness endpoint..."
+echo "==> [2/9] Asserting /api/v1/health liveness endpoint..."
 PF_PID=$(pf_start 0 "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to pod-0 failed"; exit 1; }
 assert_health_204 "$HTTP_PORT" || exit 1
@@ -160,14 +160,14 @@ pf_stop "$PF_PID"
 
 # ── phase 3: raft formation ───────────────────────────────────────────────────
 
-echo "==> [3/8] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+echo "==> [3/9] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
 assert_quorum_n 3 || exit 1
 
 # ── phase 4: write ────────────────────────────────────────────────────────────
 
 # LEADER_ORDINAL is set by assert_quorum_n above.
 
-echo "==> [4/8] Writing test data via leader pod-${LEADER_ORDINAL}..."
+echo "==> [4/9] Writing test data via leader pod-${LEADER_ORDINAL}..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
 
@@ -187,7 +187,7 @@ echo "    Write complete."
 
 # ── phase 5: read and assert ──────────────────────────────────────────────────
 
-echo "==> [5/8] Reading back test data..."
+echo "==> [5/9] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
   | jq -r '.result[0].name // empty') || {
@@ -206,7 +206,7 @@ echo "    Got: '${RESULT}'"
 
 # ── phase 6: STATUS column ────────────────────────────────────────────────────
 
-echo "==> [6/8] Asserting STATUS=HEALTHY for all peers..."
+echo "==> [6/9] Asserting STATUS=HEALTHY for all peers..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -216,7 +216,7 @@ pf_stop "$PF_PID"
 
 # ── phase 7: leadership transfer ──────────────────────────────────────────────
 
-echo "==> [7/8] Transferring Raft leadership..."
+echo "==> [7/9] Transferring Raft leadership..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -289,9 +289,9 @@ LEADER_ORDINAL=$NEW_LEADER_ORDINAL
 if [[ "$IMAGE_FLAVOR" == "native" ]]; then
   # The native image has no shell and no bin/console.sh, and the chart sets no
   # ARCADEDB_SETTINGS for it, so there is nothing for this phase to exercise.
-  echo "==> [8/8] Skipped: the native image has no shell or console."
+  echo "==> [8/9] Skipped: the native image has no shell or console."
 else
-  echo "==> [8/8] Asserting the console can write its history file..."
+  echo "==> [8/9] Asserting the console can write its history file..."
   POD="${RELEASE}-0"
 
   # bin/console.sh asks JLine for the relative history file ".history", resolved
@@ -346,7 +346,37 @@ else
   echo "    bin/console.sh runs inside the pod."
 fi
 
-# Phases 9 (helm-upgrade scale-up 3->5) and 10 (snapshot-install recovery) were
+# ── phase 9: logging configuration is loaded (issue #38) ─────────────────────
+
+echo "==> [9/9] Asserting the server loaded the chart's logging configuration..."
+POD="${RELEASE}-0"
+
+# The arcadedb-config volume hides the image's config/arcadedb-log.properties.
+# The chart mounts its own copy from a ConfigMap; if the server cannot find the
+# file it names, it prints this line and falls back to a fixed ./log directory.
+# Capture first: under pipefail, `kubectl logs | grep -q` fails on SIGPIPE when
+# grep exits at the first match, which would hide exactly the line we look for.
+POD_LOGS=$(kubectl logs -n "$NAMESPACE" "$POD")
+if grep -q "Error on loading logging configuration" <<<"$POD_LOGS"; then
+  echo "ERROR: the server did not find its logging configuration file:"
+  grep "Error on loading logging configuration" <<<"$POD_LOGS"
+  exit 1
+fi
+echo "    No logging configuration error at startup."
+
+if [[ "$IMAGE_FLAVOR" == "native" ]]; then
+  echo "    Log file check skipped: the native image has no shell."
+else
+  # The FileHandler pattern must follow arcadedb.logsDirectory (ARCADEDB_LOG_DIR).
+  kubectl exec -n "$NAMESPACE" "$POD" -- \
+    sh -c 'test -s "$ARCADEDB_LOG_DIR/arcadedb.log.0"' || {
+    echo "ERROR: no arcadedb.log.0 in the configured logs directory"
+    exit 1
+  }
+  echo "    Server log written to the configured logs directory."
+fi
+
+# Phases once numbered 9 (helm-upgrade scale-up 3->5) and 10 (snapshot-install recovery) were
 # planned but discarded after CI proved the scenarios are not supported by the
 # current ArcadeDB image: a `helm upgrade --set replicaCount=5` rolling-restarts
 # all StatefulSet pods AND adds two with a serverList of 5 entries, but Raft

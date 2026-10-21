@@ -60,6 +60,35 @@ The command removes all the Kubernetes components associated with the chart and 
 | `arcadedb.tmpDirectory`               | Writable dir for the PID file and `XDG_CACHE_HOME` (`""` = image defaults) | `/tmp`                         |
 | `arcadedb.ha.raftStorageDirectory`     | Parent directory for per-node Raft storage                        | `/home/arcadedb/raft`                    |
 
+### arcadedb.logging
+
+The image keeps `arcadedb-log.properties` in its `config/` directory, which the `arcadedb-config` volume hides. Without
+the file the server falls back to the copy bundled in its jar, which writes to a fixed `./log` and ignores
+`arcadedb.logsDirectory`. The chart therefore ships the file in a ConfigMap (`<fullname>-logging`), mounts it read-only
+at `arcadedb.logging.mountPath` and passes `-Djava.util.logging.config.file` pointing at it. Changing
+`arcadedb.logging.properties` rolls the pods through a `checksum/logging` pod annotation.
+
+| Name                          | Description                                                                                  | Value                                        |
+|-------------------------------|----------------------------------------------------------------------------------------------|----------------------------------------------|
+| `arcadedb.logging.enabled`    | Ship `arcadedb-log.properties` from a ConfigMap. `false` leaves logging to the image         | `true`                                       |
+| `arcadedb.logging.mountPath`  | Directory the ConfigMap is mounted at. Must be outside `arcadedb.configDirectory`            | `/home/arcadedb/logging`                     |
+| `arcadedb.logging.properties` | Content of `arcadedb-log.properties` (java.util.logging format)                              | the file packaged with ArcadeDB 26.10.2      |
+
+`${arcadedb.server.logsDirectory}` in `java.util.logging.FileHandler.pattern` resolves to `arcadedb.logsDirectory`. An
+`-Djava.util.logging.config.file` in `arcadedb.extraCommands` still takes precedence, since it comes later on the
+command line. For example, to log at `FINE` to the console only:
+
+```yaml
+arcadedb:
+  logging:
+    properties: |
+      handlers = java.util.logging.ConsoleHandler
+      .level = INFO
+      com.arcadedb.level = FINE
+      java.util.logging.ConsoleHandler.level = FINE
+      java.util.logging.ConsoleHandler.formatter = com.arcadedb.utility.AnsiLogFormatter
+```
+
 ### arcadedb.plugins
 
 Enable plugins by adding a plugin entry under `arcadedb.plugins`.

@@ -23,6 +23,52 @@ arcadedb:
   ## Backed by a writable emptyDir and forwarded via the ARCADEDB_LOG_DIR env var
   ## so logging works under readOnlyRootFilesystem.
   logsDirectory: "/home/arcadedb/log"
+
+  ## @section arcadedb.logging
+  ## The image ships arcadedb-log.properties in its config/ directory, which the
+  ## arcadedb-config volume hides, so the server would fall back to the copy
+  ## bundled in the engine jar: that one writes to a fixed ./log and ignores
+  ## logsDirectory. The chart ships the file from a ConfigMap instead, mounted
+  ## read-only at mountPath, and points -Djava.util.logging.config.file at it.
+  ## A change to properties rolls the pods (checksum/logging annotation).
+  logging:
+    ## @param arcadedb.logging.enabled Ship arcadedb-log.properties from a ConfigMap.
+    ## Set false to leave the logging configuration to the image (and its fallback).
+    enabled: true
+    ## @param arcadedb.logging.mountPath Directory the ConfigMap is mounted at.
+    ## Must be outside arcadedb.configDirectory.
+    mountPath: "/home/arcadedb/logging"
+    ## @param arcadedb.logging.properties Content of arcadedb-log.properties
+    ## (java.util.logging format). Defaults to the file packaged with ArcadeDB
+    ## 26.10.2. ${arcadedb.server.logsDirectory} resolves to arcadedb.logsDirectory.
+    properties: |
+      # Specify the handlers to create in the root logger
+      # (all loggers are children of the root logger)
+      handlers = java.util.logging.ConsoleHandler, java.util.logging.FileHandler
+
+      # Set the default logging level for the root logger
+      .level = INFO
+      # Suppress the Apache Ratis per-retry replication flood while a follower is briefly
+      # unreachable. Genuine SEVERE failures still surface.
+      org.apache.ratis.grpc.server.GrpcLogAppender.level = SEVERE
+      com.arcadedb.level = INFO
+
+      # Set the default logging level for new ConsoleHandler instances
+      java.util.logging.ConsoleHandler.level = INFO
+      # Set the default formatter for new ConsoleHandler instances
+      java.util.logging.ConsoleHandler.formatter = com.arcadedb.utility.AnsiLogFormatter
+
+      # Set the default logging level for new FileHandler instances
+      java.util.logging.FileHandler.level = INFO
+      # Naming style for the output file
+      java.util.logging.FileHandler.pattern=${arcadedb.server.logsDirectory}/arcadedb.log
+      # Set the default formatter for new FileHandler instances
+      java.util.logging.FileHandler.formatter = com.arcadedb.log.LogFormatter
+      # Limiting size of output file in bytes:
+      java.util.logging.FileHandler.limit=100000000
+      # Number of output files to cycle through, by appending an
+      # integer to the base file name:
+      java.util.logging.FileHandler.count=10
   ## @param arcadedb.installDirectory Directory the ArcadeDB distribution lives in
   ## inside the image (ARCADEDB_HOME, and the image WORKDIR). The server pins its
   ## JVM working directory here, so relocating consoleWorkingDirectory cannot move

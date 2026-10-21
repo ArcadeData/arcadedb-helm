@@ -1,0 +1,206 @@
+suite: Logging configuration (arcadedb-log.properties)
+templates:
+  - statefulset.yaml
+  - configmap-logging.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  # Issue #38: the writable volume at arcadedb.configDirectory hides the
+  # arcadedb-log.properties the image ships there, so the server falls back to
+  # the engine-bundled copy, whose FileHandler.pattern is a fixed ./log and
+  # ignores arcadedb.logsDirectory. The chart ships the file from a ConfigMap
+  # mounted outside configDirectory instead.
+  - it: renders a ConfigMap holding the packaged logging configuration by default
+    template: configmap-logging.yaml
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - equal:
+          path: metadata.name
+          value: test-arcadedb-logging
+      - matchRegex:
+          path: data["arcadedb-log.properties"]
+          pattern: (?m)^java\.util\.logging\.FileHandler\.pattern=\$\{arcadedb\.server\.logsDirectory\}/arcadedb\.log$
+      - matchRegex:
+          path: data["arcadedb-log.properties"]
+          pattern: (?m)^handlers = java\.util\.logging\.ConsoleHandler, java\.util\.logging\.FileHandler$
+      - matchRegex:
+          path: data["arcadedb-log.properties"]
+          pattern: (?m)^java\.util\.logging\.FileHandler\.limit=100000000$
+      - matchRegex:
+          path: data["arcadedb-log.properties"]
+          pattern: (?m)^java\.util\.logging\.FileHandler\.count=10$
+
+  - it: arcadedb.logging.properties replaces the ConfigMap content
+    template: configmap-logging.yaml
+    set:
+      arcadedb.logging.properties: |
+        handlers = java.util.logging.ConsoleHandler
+        .level = FINE
+    asserts:
+      - equal:
+          path: data["arcadedb-log.properties"]
+          value: |
+            handlers = java.util.logging.ConsoleHandler
+            .level = FINE
+
+  - it: mounts the ConfigMap read-only outside the config directory
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-logging
+            mountPath: /home/arcadedb/logging
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-logging
+            configMap:
+              name: test-arcadedb-logging
+
+  - it: jvm flavor points java.util.logging.config.file at the mounted file
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command[0]
+          value: bin/server.sh
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Djava.util.logging.config.file=/home/arcadedb/logging/arcadedb-log.properties
+
+  # server.sh passes its own -Djava.util.logging.config.file (pointing into the
+  # hidden config directory) before the chart's arguments, and the JVM keeps the
+  # last value of a repeated -D. The native command repeats the image ENTRYPOINT
+  # flags, which carry the same stale path, so the chart's flag must come after it.
+  - it: native flavor passes the mounted file after the image entrypoint default
+    template: statefulset.yaml
+    set:
+      image.flavor: native
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command[3]
+          value: -Djava.util.logging.config.file=/home/arcadedb/config/arcadedb-log.properties
+      - equal:
+          path: spec.template.spec.containers[0].command[5]
+          value: -Djava.util.logging.config.file=/home/arcadedb/logging/arcadedb-log.properties
+
+  - it: the logging flag comes before extraCommands so users can still override it
+    template: statefulset.yaml
+    set:
+      arcadedb.extraCommands:
+        - -Djava.util.logging.config.file=/custom/log.properties
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command[2]
+          value: -Djava.util.logging.config.file=/home/arcadedb/logging/arcadedb-log.properties
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Djava.util.logging.config.file=/custom/log.properties
+
+  - it: a relocated mountPath moves both the mount and the flag
+    template: statefulset.yaml
+    set:
+      arcadedb.logging.mountPath: /etc/arcadedb-logging/
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-logging
+            mountPath: /etc/arcadedb-logging
+            readOnly: true
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Djava.util.logging.config.file=/etc/arcadedb-logging/arcadedb-log.properties
+
+  - it: changing the logging properties rolls the pods through a checksum annotation
+    template: statefulset.yaml
+    set:
+      arcadedb.logging.properties: |
+        .level = FINE
+    asserts:
+      # sha256 of ".level = FINE\n", the exact ConfigMap payload
+      - equal:
+          path: spec.template.metadata.annotations["checksum/logging"]
+          value: c8baf7047c2d105fb3ed470672df8f95cbcc2b73e6126846c87d48f7457cd12a
+
+  - it: user podAnnotations are kept next to the logging checksum
+    template: statefulset.yaml
+    set:
+      podAnnotations:
+        team: data
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations.team
+          value: data
+      - exists:
+          path: spec.template.metadata.annotations["checksum/logging"]
+
+  - it: arcadedb.logging.enabled=false keeps the image file and renders nothing
+    set:
+      arcadedb.logging.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: configmap-logging.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Djava.util.logging.config.file=/home/arcadedb/logging/arcadedb-log.properties
+        template: statefulset.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-logging
+            mountPath: /home/arcadedb/logging
+            readOnly: true
+        template: statefulset.yaml
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/logging"]
+        template: statefulset.yaml
+
+  - it: a null logging section counts as the defaults being off
+    set:
+      arcadedb.logging: null
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: configmap-logging.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Djava.util.logging.config.file=/home/arcadedb/logging/arcadedb-log.properties
+        template: statefulset.yaml
+
+  - it: fails when the logging mountPath is the config directory
+    template: statefulset.yaml
+    set:
+      arcadedb.logging.mountPath: /home/arcadedb/config
+    asserts:
+      - failedTemplate:
+          errorPattern: arcadedb.logging.mountPath .* must be outside arcadedb.configDirectory
+
+  - it: fails when the logging mountPath is inside the config directory
+    template: statefulset.yaml
+    set:
+      arcadedb.logging.mountPath: /home/arcadedb/config/logging
+    asserts:
+      - failedTemplate:
+          errorPattern: arcadedb.logging.mountPath .* must be outside arcadedb.configDirectory
+
+  - it: fails when the logging mountPath is a parent of the config directory
+    template: statefulset.yaml
+    set:
+      arcadedb.logging.mountPath: /home/arcadedb
+    asserts:
+      - failedTemplate:
+          errorPattern: arcadedb.logging.mountPath .* must be outside arcadedb.configDirectory
+
+  - it: a sibling directory that only shares a name prefix is accepted
+    template: statefulset.yaml
+    set:
+      arcadedb.logging.mountPath: /home/arcadedb/config-logging
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Djava.util.logging.config.file=/home/arcadedb/config-logging/arcadedb-log.properties
