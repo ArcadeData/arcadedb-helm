@@ -18,16 +18,17 @@ See [charts/arcadedb/README.md](charts/arcadedb/README.md) and [charts/arcadedb/
 
 ## Storage
 
-`volumes`, `volumeMounts`, and `volumeClaimTemplates` are rendered verbatim into
-the StatefulSet. The chart ships five reserved volumes — `arcadedb-data`,
-`arcadedb-config`, `arcadedb-logs`, `arcadedb-tmp`, `arcadedb-raft` — mounted at
-the directories the server uses.
+The database directory, the config directory (users, groups, API tokens) and,
+when HA is active, the Raft log are each persisted on a per-replica PVC by
+default (`persistence.enabled`, `persistence.config.enabled`,
+`persistence.raft.enabled`). Logs and `/tmp` stay on `emptyDir`. Disabling a
+`persistence.*` flag backs that directory with an `emptyDir` and the install
+notes warn that it is ephemeral. Extra claims go under `volumeClaimTemplates`.
 
-**Every one defaults to `emptyDir`, so a fresh install is ephemeral.** To persist
-a directory, remove its `emptyDir` from `volumes` and add a
-`volumeClaimTemplates` entry of the same name; the StatefulSet mounts the
-per-replica PVC under the existing mount path. See
-[Persistence](charts/arcadedb/README.md#persistence-1) for a worked example.
+**Upgrading from 26.10.2 or earlier:** those charts kept everything on
+`emptyDir`, and moving to PVCs changes the StatefulSet's immutable
+`volumeClaimTemplates`. Back up your databases, delete the StatefulSet, then
+upgrade. See [Persistence](charts/arcadedb/README.md#persistence-1) for details.
 
 ## Observability
 

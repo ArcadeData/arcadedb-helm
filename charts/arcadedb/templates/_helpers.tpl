@@ -475,3 +475,66 @@ Returns YAML (possibly empty).
 {{ toYaml . }}
 {{- end }}
 {{- end -}}
+
+{{/*
+Storage plan for the reserved arcadedb-data / arcadedb-config / arcadedb-raft
+volumes (#34), returned as JSON:
+  claims    - volumeClaimTemplates the chart generates from persistence.*
+  volumes   - the pod volumes: the `volumes` value minus the emptyDir entries a
+              generated claim replaces, plus an emptyDir for every reserved name
+              nothing else backs
+  ephemeral - reserved names that end up on an emptyDir and hold state worth
+              keeping (arcadedb-raft only counts while HA is active)
+
+A reserved name the user backs explicitly - a `volumeClaimTemplates` entry, or a
+`volumes` entry that is not an emptyDir - is left alone. An emptyDir entry in
+`volumes` does not block persistence: values files copied from older charts list
+every reserved name as an emptyDir, and the persistence.* flags must still win.
+*/}}
+{{- define "arcadedb.persistence.plan" -}}
+{{- $ha := or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled -}}
+{{- $data := .Values.persistence | default dict -}}
+{{- $config := $data.config | default dict -}}
+{{- $raft := $data.raft | default dict -}}
+{{- $reserved := list
+      (dict "name" "arcadedb-data" "settings" $data "enabled" $data.enabled "stateful" true)
+      (dict "name" "arcadedb-config" "settings" $config "enabled" $config.enabled "stateful" true)
+      (dict "name" "arcadedb-raft" "settings" $raft "enabled" (and $ha $raft.enabled) "stateful" $ha) -}}
+{{- $userClaims := dict -}}
+{{- range .Values.volumeClaimTemplates -}}
+{{- with .metadata -}}{{- with .name -}}{{- $_ := set $userClaims . true -}}{{- end -}}{{- end -}}
+{{- end -}}
+{{- $userVolumes := dict -}}
+{{- range .Values.volumes -}}
+{{- with .name -}}{{- $_ := set $userVolumes . true -}}{{- end -}}
+{{- end -}}
+{{- $userEmptyDirs := dict -}}
+{{- range .Values.volumes -}}
+{{- if and .name (hasKey . "emptyDir") -}}{{- $_ := set $userEmptyDirs .name true -}}{{- end -}}
+{{- end -}}
+{{- $claims := list -}}
+{{- $generated := dict -}}
+{{- $fallback := list -}}
+{{- $ephemeral := list -}}
+{{- range $reserved -}}
+{{- $name := .name -}}
+{{- $userOwned := or (hasKey $userClaims $name) (and (hasKey $userVolumes $name) (not (hasKey $userEmptyDirs $name))) -}}
+{{- if $userOwned -}}
+{{- else if .enabled -}}
+{{- $spec := dict "accessModes" (list .settings.accessMode) "resources" (dict "requests" (dict "storage" .settings.size)) -}}
+{{- with .settings.storageClass -}}{{- $_ := set $spec "storageClassName" . -}}{{- end -}}
+{{- $claims = append $claims (dict "metadata" (dict "name" $name) "spec" $spec) -}}
+{{- $_ := set $generated $name true -}}
+{{- else -}}
+{{- if not (hasKey $userVolumes $name) -}}
+{{- $fallback = append $fallback (dict "name" $name "emptyDir" dict) -}}
+{{- end -}}
+{{- if .stateful -}}{{- $ephemeral = append $ephemeral $name -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $volumes := list -}}
+{{- range .Values.volumes -}}
+{{- if not (and .name (hasKey $generated .name)) -}}{{- $volumes = append $volumes . -}}{{- end -}}
+{{- end -}}
+{{- dict "claims" $claims "volumes" (concat $fallback $volumes) "ephemeral" $ephemeral | toJson -}}
+{{- end -}}

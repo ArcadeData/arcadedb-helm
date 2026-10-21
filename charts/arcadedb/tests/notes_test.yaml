@@ -36,19 +36,94 @@ tests:
           path: raw
           pattern: "https://chart-example.local/"
 
-  - it: warns about ephemeral data when persistence is disabled
+  - it: does not warn about ephemeral data with default values
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "EPHEMERAL"
+
+  - it: does not warn about ephemeral data for an HA install with default values
+    set:
+      replicaCount: 3
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "EPHEMERAL"
+
+  - it: warns that the database directory is ephemeral when persistence is disabled
     set:
       persistence.enabled: false
     asserts:
       - matchRegex:
           path: raw
-          pattern: "WARNING: persistence.enabled is false"
+          pattern: "WARNING: arcadedb-data is backed by an emptyDir"
+      - matchRegex:
+          path: raw
+          pattern: "EPHEMERAL"
 
-  - it: does not warn when persistence is enabled (default)
+  - it: warns that the config directory is ephemeral when config persistence is disabled
+    set:
+      persistence.config.enabled: false
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: arcadedb-config is backed by an emptyDir"
+
+  - it: warns about Raft state only when HA is active
+    set:
+      replicaCount: 3
+      persistence.raft.enabled: false
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: arcadedb-raft is backed by an emptyDir"
+
+  - it: does not warn about Raft state on a single node
+    set:
+      persistence.raft.enabled: false
     asserts:
       - notMatchRegex:
           path: raw
-          pattern: "WARNING: persistence.enabled is false"
+          pattern: "EPHEMERAL"
+
+  - it: lists every ephemeral reserved volume in one warning
+    set:
+      replicaCount: 3
+      persistence.enabled: false
+      persistence.config.enabled: false
+      persistence.raft.enabled: false
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: arcadedb-data, arcadedb-config, arcadedb-raft are backed by an emptyDir"
+
+  - it: warns when a volumes override puts a reserved directory on an emptyDir with persistence off
+    set:
+      persistence.enabled: false
+      volumes:
+        - name: arcadedb-data
+          emptyDir: {}
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: arcadedb-data is backed by an emptyDir"
+
+  - it: does not warn when a user volume or claim backs the directory
+    set:
+      persistence.enabled: false
+      persistence.config.enabled: false
+      volumes:
+        - name: arcadedb-data
+          hostPath: { path: /mnt/data }
+      volumeClaimTemplates:
+        - metadata: { name: arcadedb-config }
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources: { requests: { storage: 1Gi } }
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "EPHEMERAL"
 
   - it: warns that server.sh env vars are ignored by the native image
     set:

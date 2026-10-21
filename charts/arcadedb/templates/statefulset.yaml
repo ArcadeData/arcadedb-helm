@@ -1,6 +1,7 @@
 {{- include "arcadedb.observability.validate" . -}}
 {{- include "arcadedb.configDirectory.validate" . -}}
 {{- $native := include "arcadedb.native" . -}}
+{{- $storage := include "arcadedb.persistence.plan" . | fromJson -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -217,7 +218,7 @@ spec:
           secret:
             secretName: {{ include "arcadedb.tls.secretName" . }}
         {{- end }}
-        {{- with .Values.volumes }}
+        {{- with $storage.volumes }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with .Values.nodeSelector }}
@@ -232,7 +233,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-  {{- with .Values.volumeClaimTemplates }}
+  {{- with concat $storage.claims (.Values.volumeClaimTemplates | default list) }}
   volumeClaimTemplates:
     {{- toYaml . | nindent 4 }}
   {{- end }}
