@@ -44,8 +44,9 @@ arcadedb:
   ## @section arcadedb.ha
   ha:
     ## @param arcadedb.ha.raftStorageDirectory Parent directory for the per-node
-    ## raft-storage-<node> folders. Backed by a writable emptyDir; only used when
-    ## HA is active (replicaCount > 1 or autoscaling enabled).
+    ## raft-storage-<node> folders, mounted from the arcadedb-raft volume (a PVC
+    ## when persistence.raft.enabled, else an emptyDir). Only used when HA is
+    ## active (replicaCount > 1 or autoscaling enabled).
     raftStorageDirectory: "/home/arcadedb/raft"
 
   ## @section arcadedb.credentials
@@ -148,8 +149,8 @@ securityContext:
   runAsGroup: 1000
   allowPrivilegeEscalation: false
   ## readOnlyRootFilesystem hardens the container; the chart provides writable
-  ## emptyDir mounts for logs, /tmp, Raft storage, and (when their PVCs are
-  ## disabled) the database and config directories.
+  ## emptyDir mounts for logs and /tmp, and PVCs (or, when persistence.* is
+  ## disabled, emptyDirs) for the database, config and Raft directories.
   readOnlyRootFilesystem: true
   capabilities:
     drop: [ALL]
@@ -307,8 +308,16 @@ autoscaling:
   # targetMemoryUtilizationPercentage: 80
 
 ## @section persistence
+## The chart generates a per-replica volumeClaimTemplates entry for each enabled
+## directory below and drops any emptyDir of the same name from `volumes`. A
+## directory you back yourself (a `volumeClaimTemplates` entry of the same name, or
+## a non-emptyDir `volumes` entry) is left alone. Disabled directories fall back to
+## an emptyDir, and NOTES.txt warns that their content is lost on pod restart.
+## NOTE: a StatefulSet's volumeClaimTemplates cannot change after creation, so
+## toggling these flags (or HA, for Raft) on an installed release needs the
+## StatefulSet recreated - see "Upgrading" in the chart README.
 persistence:
-  ## @param persistence.enabled Persist the database directory with a PVC.
+  ## @param persistence.enabled Persist the database directory (arcadedb-data) with a PVC.
   ## Set to false only for ephemeral/dev deployments - all data is lost on pod restart.
   enabled: true
   ## @param persistence.size PVC size
@@ -319,16 +328,30 @@ persistence:
   storageClass: ""
 
   ## @section persistence.config
-  ## Persist the config directory (users, tokens, server settings).
+  ## Persist the config directory (users, groups, API tokens, server settings).
   ## Without this, configured users and tokens are lost on pod restart.
   config:
-    ## @param persistence.config.enabled Persist the config directory with a separate PVC.
-    enabled: false
+    ## @param persistence.config.enabled Persist the config directory (arcadedb-config) with a separate PVC.
+    enabled: true
     ## @param persistence.config.size PVC size for the config directory
     size: 1Gi
     ## @param persistence.config.accessMode PVC access mode for config
     accessMode: ReadWriteOnce
     ## @param persistence.config.storageClass StorageClass name for config PVC. Empty = cluster default.
+    storageClass: ""
+
+  ## @section persistence.raft
+  ## Persist the Raft log and snapshots (arcadedb.ha.raftStorageDirectory). Only
+  ## rendered while HA is active; a single node keeps an unused emptyDir. Without
+  ## it, a restarted HA node rejoins with an empty log and must be re-synced.
+  raft:
+    ## @param persistence.raft.enabled Persist the Raft directory (arcadedb-raft) with a PVC when HA is active.
+    enabled: true
+    ## @param persistence.raft.size PVC size for the Raft directory
+    size: 1Gi
+    ## @param persistence.raft.accessMode PVC access mode for Raft
+    accessMode: ReadWriteOnce
+    ## @param persistence.raft.storageClass StorageClass name for the Raft PVC. Empty = cluster default.
     storageClass: ""
 
 ## @param volumeMounts Pod volume mounts, rendered verbatim. Defaults mount the
@@ -348,26 +371,22 @@ volumeMounts:
   - name: arcadedb-raft
     mountPath: /home/arcadedb/raft
 
-## @param volumes Pod volumes, rendered verbatim. Defaults back every reserved mount
-## with an ephemeral emptyDir. To persist data / config / Raft state, remove that name
-## here and declare a matching entry under `volumeClaimTemplates` (a StatefulSet
-## auto-mounts a per-replica volume of the same name).
+## @param volumes Pod volumes. Defaults back logs and /tmp with an emptyDir. The
+## arcadedb-data / arcadedb-config / arcadedb-raft volumes come from `persistence`
+## (a generated PVC, or an emptyDir when disabled), so they need no entry here. An
+## entry for one of those names that is not an emptyDir (e.g. hostPath, an existing
+## persistentVolumeClaim) replaces the chart's backing for it; an emptyDir entry is
+## dropped while the matching persistence flag is on.
 volumes:
-  - name: arcadedb-data
-    emptyDir: {}
-  - name: arcadedb-config
-    emptyDir: {}
   - name: arcadedb-logs
     emptyDir: {}
   - name: arcadedb-tmp
     emptyDir: {}
-  - name: arcadedb-raft
-    emptyDir: {}
 
-## @param volumeClaimTemplates StatefulSet per-replica PVCs, rendered verbatim. Empty
-## by default (all volumes are emptyDir). Add an entry named arcadedb-data /
-## arcadedb-config / arcadedb-raft (and drop the matching emptyDir from `volumes`) to
-## persist that directory; or add your own for backups / replication.
+## @param volumeClaimTemplates Extra StatefulSet per-replica PVCs, rendered verbatim
+## after the ones generated from `persistence`. An entry named arcadedb-data /
+## arcadedb-config / arcadedb-raft replaces the generated claim for that directory;
+## add your own names for backups / replication (with a matching volumeMounts entry).
 volumeClaimTemplates: []
 # - metadata:
 #     name: arcadedb-data
