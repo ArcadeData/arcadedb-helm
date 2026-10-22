@@ -2,12 +2,13 @@ HELM ?= helm
 CHART_DIR := charts/arcadedb
 HELM_UNITTEST_VERSION := 0.5.2
 
-.PHONY: help lint test-unit test-config-keys test-integration test plugin-install
+.PHONY: help lint test-unit test-config-seed test-config-keys test-integration test plugin-install
 
 help:
 	@echo "Targets:"
 	@echo "  make lint              Run helm lint"
 	@echo "  make test-unit         Run helm-unittest suites"
+	@echo "  make test-config-seed  Run the config-seed init container script against sample files"
 	@echo "  make test-config-keys  Check rendered -Darcadedb.* keys against the server image (needs docker)"
 	@echo "  make test-integration  Run kind-based integration tests"
 	@echo "  make test              All of the above"
@@ -27,10 +28,13 @@ plugin-install:
 test-unit: plugin-install
 	$(HELM) unittest $(CHART_DIR)
 
+test-config-seed:
+	bash ci/test-config-seed.sh
+
 test-config-keys:
 	bash ci/check-config-keys.sh
 
 test-integration:
 	bash ci/integration-test.sh
 
-test: lint test-unit test-config-keys test-integration
+test: lint test-unit test-config-seed test-config-keys test-integration

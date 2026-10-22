@@ -1,0 +1,241 @@
+suite: Gremlin port written into gremlin-server.yaml by the chart (#58)
+templates:
+  - statefulset.yaml
+  - service.yaml
+  - networkpolicy.yaml
+release:
+  name: test
+  namespace: default
+# The Gremlin plugin reads its port only from gremlin-server.yaml (#47), and the
+# server has no setting the chart can pass instead. With
+# arcadedb.plugins.gremlin.writePortToConfig: true the config-seed init container
+# sets the top-level port: key of gremlin-server.yaml on the config volume to
+# arcadedb.plugins.gremlin.port on every start (GREMLIN_PORT), so the server, the
+# Services and the NetworkPolicy all follow that one value.
+# ci/test-config-seed.sh runs the script itself against sample files.
+tests:
+  - it: hands the port to config-seed when writePortToConfig is set
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - notFailedTemplate: {}
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-seed
+      - equal:
+          path: spec.template.spec.initContainers[0].env
+          value:
+            - name: GREMLIN_PORT
+              value: "9999"
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'if \[ -n "\$\{GREMLIN_PORT:-\}" \]'
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.gremlin.port=9999"
+
+  - it: writes 8182 when the port is left unset
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].env
+          value:
+            - name: GREMLIN_PORT
+              value: "8182"
+
+  - it: accepts a string port
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: "7777"
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].env
+          value:
+            - name: GREMLIN_PORT
+              value: "7777"
+
+  - it: the headless Service exposes the written port
+    template: service.yaml
+    documentIndex: 1
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 9999, targetPort: 9999, protocol: TCP, name: gremlin-port }
+      - notContains:
+          path: spec.ports
+          content: { port: 8182, targetPort: 8182, protocol: TCP, name: gremlin-port }
+
+  - it: the external Service exposes the written port
+    template: service.yaml
+    documentIndex: 2
+    set:
+      service.external.enabled: true
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - equal: { path: metadata.name, value: test-arcadedb-external }
+      - contains:
+          path: spec.ports
+          content: { port: 9999, targetPort: 9999, protocol: TCP, name: gremlin-port }
+
+  - it: the NetworkPolicy opens the written port
+    template: networkpolicy.yaml
+    documentIndex: 0
+    set:
+      networkPolicy.enabled: true
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - contains:
+          path: spec.ingress[0].ports
+          content: { port: 9999, protocol: TCP }
+      - notContains:
+          path: spec.ingress[0].ports
+          content: { port: 8182, protocol: TCP }
+
+  - it: passes no GREMLIN_PORT by default, leaving gremlin-server.yaml to the operator
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers[0].env
+
+  - it: passes no GREMLIN_PORT when the port is managed externally
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers[0].env
+
+  - it: passes no GREMLIN_PORT when the gremlin plugin is disabled
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: false
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - notFailedTemplate: {}
+      - notExists:
+          path: spec.template.spec.initContainers[0].env
+
+  - it: refuses writePortToConfig together with portManagedExternally
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.portManagedExternally and arcadedb.plugins.gremlin.writePortToConfig are both true: either your own gremlin-server.yaml sets the port, or the chart writes it there. Set only one."
+
+  - it: refuses a port that is not a valid TCP port
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 70000
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.port is 70000, which is not a TCP port (1-65535)."
+
+  # Every path where config-seed cannot reach the file the server reads fails
+  # the render: a port the chart exposes but never writes would point the
+  # Services at nothing. The check runs in _arcadedb.plugin.ports, so (as for
+  # #47) the failure surfaces at the StatefulSet, which every release renders.
+  - it: refuses writePortToConfig when config-seed is disabled
+    template: statefulset.yaml
+    set:
+      initContainers.configSeed.enabled: false
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.writePortToConfig needs the config-seed init container, which writes the port into gremlin-server.yaml: set initContainers.configSeed.enabled=true, or set the port in your own gremlin-server.yaml with arcadedb.plugins.gremlin.portManagedExternally: true."
+
+  - it: keeps working when the configSeed key is missing (helm upgrade --reuse-values)
+    template: statefulset.yaml
+    set:
+      initContainers.configSeed: null
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].env
+          value:
+            - name: GREMLIN_PORT
+              value: "9999"
+
+  # Under the default readOnlyRootFilesystem an unmounted config directory
+  # already fails the render (arcadedb.configDirectory.validate); with it off,
+  # the server could write there, but config-seed's edit would be lost.
+  - it: refuses writePortToConfig when no volume holds the config directory
+    template: statefulset.yaml
+    set:
+      securityContext.readOnlyRootFilesystem: false
+      volumeMounts:
+        - name: arcadedb-data
+          mountPath: /home/arcadedb/databases
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.writePortToConfig needs a volumeMounts entry that holds arcadedb.configDirectory (/home/arcadedb/config): without one, the gremlin-server.yaml config-seed writes would not outlive the init container."
+
+  - it: refuses writePortToConfig when gremlin-server.yaml itself is mounted from another volume
+    template: statefulset.yaml
+    set:
+      volumeMounts:
+        - name: arcadedb-config
+          mountPath: /home/arcadedb/config
+        - name: my-gremlin
+          mountPath: /home/arcadedb/config/gremlin-server.yaml
+          subPath: gremlin-server.yaml
+      volumes:
+        - name: my-gremlin
+          configMap:
+            name: my-gremlin
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.writePortToConfig cannot write the port: volumeMounts entry 'my-gremlin' is mounted on /home/arcadedb/config/gremlin-server.yaml, so the server reads that file, not the one config-seed edits. Set port: in it and use arcadedb.plugins.gremlin.portManagedExternally: true instead."
+
+  - it: writes into a relocated config directory below a parent mount
+    template: statefulset.yaml
+    set:
+      arcadedb.configDirectory: /home/arcadedb/config/custom
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.writePortToConfig: true
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: /config-seed/custom
+      - equal:
+          path: spec.template.spec.initContainers[0].env
+          value:
+            - name: GREMLIN_PORT
+              value: "9999"
