@@ -183,6 +183,10 @@ of `bin/server.sh`. Compared with the JVM flavor:
   `ARCADEDB_OPTS_MEMORY`, `ARCADEDB_SETTINGS`) have no effect. Pass `-D` and heap
   flags through `arcadedb.extraCommands`, e.g. `-Xmx2g`.
 - `bin/console.sh` and `kubectl exec ... sh` are not available in the pod.
+- The `config-seed` init container is skipped (it needs a shell), so the config
+  volume gets no `server-groups.json` from the image: the server uses its
+  built-in default, which has no `readonly` group. See
+  [Default config files](#default-config-files).
 - When you set `image.tag` yourself, choose the `image.flavor` that matches it
   (e.g. `image.tag=latest-native` with `image.flavor=native`).
 
@@ -196,7 +200,8 @@ of `bin/server.sh`. Compared with the JVM flavor:
 | `initContainers.configDirectory.image.repository`     | Repository for the config-chown image                                                                        | `library/busybox` |
 | `initContainers.configDirectory.image.tag`            | Tag for the config-chown image                                                                               | `1.37.0`          |
 | `initContainers.configDirectory.image.pullPolicy`     | Pull policy for the config-chown image                                                                       | `IfNotPresent`    |
-| `initContainers.otherContainers`                      | Additional init containers, rendered verbatim after config-chown                                             | `[]`              |
+| `initContainers.configSeed.enabled`                   | Copy missing default config files from the server image into the config directory (`config-seed`)           | `true`            |
+| `initContainers.otherContainers`                      | Additional init containers, rendered verbatim after config-chown and config-seed                             | `[]`              |
 
 ### serviceAccount
 
@@ -497,7 +502,35 @@ If you change `arcadedb.databaseDirectory`, `arcadedb.configDirectory`, `arcaded
 `arcadedb.configDirectory` is passed to the server as `-Darcadedb.server.configDirectory`, which needs ArcadeDB
 26.10.1 or later: an older `image.tag` ignores it and keeps using `<rootPath>/config`. With
 `readOnlyRootFilesystem` enabled, rendering fails if no `volumeMounts` entry covers that directory. A relocated
-config directory starts empty apart from what the server writes itself (users, groups, tokens).
+config directory is seeded by the `config-seed` init container like the default one (see
+[Default config files](#default-config-files)).
+
+### Default config files
+
+The volume mounted at `arcadedb.configDirectory` hides the files the image ships in
+`<installDirectory>/config`. Two of them change the server's behaviour when they are missing:
+
+- `server-groups.json`: without it the server uses a built-in default that has no `readonly` group.
+- `gremlin-server.yaml`, with `gremlin-server.properties` and `gremlin-server.groovy`: without them the Gremlin
+  plugin logs `Cannot find Gremlin Server configuration file` and starts from an empty configuration (no
+  `graph`, no ArcadeDB serializers). Only matters with `arcadedb.plugins.gremlin.enabled`.
+
+The chart adds a `config-seed` init container that runs the server image itself (same registry, repository and
+tag, so the defaults match the server version), mounts the volume holding the config directory at
+`/config-seed` so the image's own `config/` stays visible, and copies each of those files that the config
+directory does not hold yet. A file that already exists is never overwritten, so changes made at runtime or by
+hand survive restarts. The logging files are not seeded: the chart ships
+`arcadedb-log.properties` from a ConfigMap (see `arcadedb.logging`). The container uses `securityContext`, so
+it runs as the ArcadeDB user, and it runs after `config-chown` when that one is enabled.
+
+It is skipped with `image.flavor=native` (the native image has no shell), when no `volumeMounts` entry holds
+`arcadedb.configDirectory`, and when `initContainers.configSeed.enabled` is `false`.
+
+**Existing installs.** A release installed with an earlier chart version gets the files on the first start
+after the upgrade, unless its config volume already holds them. If the volume already holds a
+`server-groups.json` without the `readonly` group (for example one saved from the built-in default), the init
+container keeps it: add the group by editing the file and restarting the pod, or delete the file and restart
+the pod to have it seeded again (this drops any group added since).
 
 ### Config Directory Permissions
 
