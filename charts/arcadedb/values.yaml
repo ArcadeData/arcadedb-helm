@@ -148,6 +148,10 @@ arcadedb:
     #   # Must be 8182 (any other value fails the render): the Gremlin plugin reads
     #   # its port from gremlin-server.yaml, not from a -D setting the chart can pass (#47).
     #   port: 8182
+    #   # Set to true when your own gremlin-server.yaml on the config volume sets `port:`;
+    #   # `port` above must then match it, and is only what the Services and the
+    #   # NetworkPolicy expose (#52). The chart still does not change the server's port.
+    #   portManagedExternally: false
     # postgres:
     #   enabled: true
     #   port: 5432

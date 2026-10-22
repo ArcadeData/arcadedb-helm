@@ -1,0 +1,128 @@
+suite: Gremlin port managed outside the chart (#52)
+templates:
+  - statefulset.yaml
+  - service.yaml
+  - networkpolicy.yaml
+release:
+  name: test
+  namespace: default
+# The chart cannot move the Gremlin port (#47): the plugin reads it from
+# gremlin-server.yaml. arcadedb.plugins.gremlin.portManagedExternally: true
+# tells the chart the operator set that port in their own gremlin-server.yaml,
+# so arcadedb.plugins.gremlin.port is taken as the port to expose instead of
+# failing the render. The chart still passes no port to the server.
+tests:
+  - it: renders a port other than 8182 when the port is managed externally
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - notFailedTemplate: {}
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.plugins=GremlinServer:com.arcadedb.server.gremlin.GremlinServerPlugin"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.gremlin.port=9999"
+
+  - it: the headless Service exposes the externally managed port
+    template: service.yaml
+    documentIndex: 1
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 9999, targetPort: 9999, protocol: TCP, name: gremlin-port }
+      - notContains:
+          path: spec.ports
+          content: { port: 8182, targetPort: 8182, protocol: TCP, name: gremlin-port }
+
+  - it: the external Service exposes the externally managed port
+    template: service.yaml
+    documentIndex: 2
+    set:
+      service.external.enabled: true
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - equal: { path: metadata.name, value: test-arcadedb-external }
+      - contains:
+          path: spec.ports
+          content: { port: 9999, targetPort: 9999, protocol: TCP, name: gremlin-port }
+
+  - it: the NetworkPolicy opens the externally managed port
+    template: networkpolicy.yaml
+    documentIndex: 0
+    set:
+      networkPolicy.enabled: true
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - contains:
+          path: spec.ingress[0].ports
+          content: { port: 9999, protocol: TCP }
+      - notContains:
+          path: spec.ingress[0].ports
+          content: { port: 8182, protocol: TCP }
+
+  - it: a string port is accepted when the port is managed externally
+    template: service.yaml
+    documentIndex: 1
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: "7777"
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 7777, targetPort: 7777, protocol: TCP, name: gremlin-port }
+
+  - it: the Service still exposes 8182 when the port is managed externally and left unset
+    template: service.yaml
+    documentIndex: 1
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 8182, targetPort: 8182, protocol: TCP, name: gremlin-port }
+
+  - it: portManagedExternally false keeps refusing a port other than 8182
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.portManagedExternally: false
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182."
+
+  - it: refuses a port that is not a valid TCP port even when managed externally
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 70000
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.port is 70000, which is not a TCP port (1-65535)."
+
+  - it: the native flavor still refuses the gremlin plugin when the port is managed externally
+    template: statefulset.yaml
+    set:
+      image.flavor: native
+      image.tag: 26.10.1-native
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+      arcadedb.plugins.gremlin.portManagedExternally: true
+    asserts:
+      - failedTemplate:
+          errorMessage: "The gremlin plugin is not included in the native image (image.flavor=native). Disable arcadedb.plugins.gremlin or use image.flavor=jvm."
