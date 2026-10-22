@@ -119,6 +119,9 @@ When a new ArcadeDB version is released:
    **remove that override** so the PR job tests the pinned `appVersion` again.
 4. The latest-image guard needs no change — it keeps watching the next cycle's
    rolling image.
+5. Leave the `integration-root-password-env` job in `.github/workflows/lint.yml`
+   on its pinned pre-26.11.1 tag: it exists to boot the HA root-password
+   env-var fallback, which the chart only takes on images older than 26.11.1.
 
 ## Release
 

@@ -59,3 +59,14 @@ jobs:
     uses: ./.github/workflows/integration-reusable.yml
     with:
       flavor: native
+
+  # HA on a pre-26.11.1 image with a user-supplied root password Secret and no
+  # cluster token: the chart passes the password as the env var
+  # arcadedb.server.rootPassword instead of a file (issue #45). The tag is pinned
+  # below 26.11.1 so that branch stays tested after appVersion moves past it.
+  integration-root-password-env:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      imageTag: "26.10.2"
+      rootPasswordSecret: arcadedb-root-password
+      rootPasswordFrom: env

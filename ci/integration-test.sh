@@ -8,6 +8,25 @@ RAFT_TIMEOUT=60
 ROLLOUT_TIMEOUT=120
 # image.flavor the chart was installed with (jvm|native).
 IMAGE_FLAVOR=${IMAGE_FLAVOR:-jvm}
+# Secret and key the root password was installed from. Empty name = the
+# chart-generated arcadedb-credentials-secret, which also carries clusterToken.
+ROOT_PASSWORD_SECRET=${ROOT_PASSWORD_SECRET:-}
+ROOT_PASSWORD_KEY=${ROOT_PASSWORD_KEY:-}
+# How the chart is expected to hand the root password to the server:
+#   file - -Darcadedb.server.rootPasswordPath plus -Darcadedb.ha.clusterTokenPath
+#          (the generated Secret, or an image >= 26.11.1)
+#   env  - the arcadedb.server.rootPassword env var: HA on an image older than
+#          26.11.1 with a user-supplied Secret and no cluster token (issue #45)
+ROOT_PASSWORD_FROM=${ROOT_PASSWORD_FROM:-file}
+case "$ROOT_PASSWORD_FROM" in
+  file) ;;
+  env)
+    [[ -n "$ROOT_PASSWORD_SECRET" && -n "$ROOT_PASSWORD_KEY" ]] || {
+      echo "ERROR: ROOT_PASSWORD_FROM=env needs ROOT_PASSWORD_SECRET and ROOT_PASSWORD_KEY"
+      exit 1
+    } ;;
+  *) echo "ERROR: ROOT_PASSWORD_FROM must be 'file' or 'env' (got '${ROOT_PASSWORD_FROM}')"; exit 1 ;;
+esac
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -137,22 +156,25 @@ cluster_status_assert_healthy() {
 
 # ── retrieve password ─────────────────────────────────────────────────────────
 
-PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
-  -n "$NAMESPACE" \
-  -o jsonpath='{.data.rootPassword}' | base64 -d)
+# jq rather than jsonpath: a user-supplied key may contain dots.
+PASSWORD_SECRET=${ROOT_PASSWORD_SECRET:-arcadedb-credentials-secret}
+PASSWORD_KEY=${ROOT_PASSWORD_KEY:-rootPassword}
+PASSWORD=$(kubectl get secret "$PASSWORD_SECRET" -n "$NAMESPACE" -o json \
+  | jq -r --arg k "$PASSWORD_KEY" '.data[$k] // empty' | base64 -d)
 
-[[ -n "$PASSWORD" ]] || { echo "ERROR: rootPassword secret is empty or missing"; exit 1; }
+[[ -n "$PASSWORD" ]] || {
+  echo "ERROR: key ${PASSWORD_KEY} of secret ${PASSWORD_SECRET} is empty or missing"; exit 1; }
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
-echo "==> [1/11] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
+echo "==> [1/12] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
 echo "    All 3 pods Ready."
 
 # ── phase 2: liveness health probe ────────────────────────────────────────────
 
-echo "==> [2/11] Asserting /api/v1/health liveness endpoint..."
+echo "==> [2/12] Asserting /api/v1/health liveness endpoint..."
 PF_PID=$(pf_start 0 "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to pod-0 failed"; exit 1; }
 assert_health_204 "$HTTP_PORT" || exit 1
@@ -160,14 +182,14 @@ pf_stop "$PF_PID"
 
 # ── phase 3: raft formation ───────────────────────────────────────────────────
 
-echo "==> [3/11] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+echo "==> [3/12] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
 assert_quorum_n 3 || exit 1
 
 # ── phase 4: write ────────────────────────────────────────────────────────────
 
 # LEADER_ORDINAL is set by assert_quorum_n above.
 
-echo "==> [4/11] Writing test data via leader pod-${LEADER_ORDINAL}..."
+echo "==> [4/12] Writing test data via leader pod-${LEADER_ORDINAL}..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
 
@@ -187,7 +209,7 @@ echo "    Write complete."
 
 # ── phase 5: read and assert ──────────────────────────────────────────────────
 
-echo "==> [5/11] Reading back test data..."
+echo "==> [5/12] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
   | jq -r '.result[0].name // empty') || {
@@ -206,7 +228,7 @@ echo "    Got: '${RESULT}'"
 
 # ── phase 6: STATUS column ────────────────────────────────────────────────────
 
-echo "==> [6/11] Asserting STATUS=HEALTHY for all peers..."
+echo "==> [6/12] Asserting STATUS=HEALTHY for all peers..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -216,7 +238,7 @@ pf_stop "$PF_PID"
 
 # ── phase 7: leadership transfer ──────────────────────────────────────────────
 
-echo "==> [7/11] Transferring Raft leadership..."
+echo "==> [7/12] Transferring Raft leadership..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -289,9 +311,9 @@ LEADER_ORDINAL=$NEW_LEADER_ORDINAL
 if [[ "$IMAGE_FLAVOR" == "native" ]]; then
   # The native image has no shell and no bin/console.sh, and the chart sets no
   # ARCADEDB_SETTINGS for it, so there is nothing for this phase to exercise.
-  echo "==> [8/11] Skipped: the native image has no shell or console."
+  echo "==> [8/12] Skipped: the native image has no shell or console."
 else
-  echo "==> [8/11] Asserting the console can write its history file..."
+  echo "==> [8/12] Asserting the console can write its history file..."
   POD="${RELEASE}-0"
 
   # bin/console.sh asks JLine for the relative history file ".history", resolved
@@ -346,42 +368,70 @@ else
   echo "    bin/console.sh runs inside the pod."
 fi
 
-# ── phase 9: credentials stay off the command line (issue #35) ──────────────
+# ── phase 9: credentials stay off the command line (issues #35, #45) ─────────
 
-# The cluster just formed quorum (phase 3) with these settings, so the token file
-# and the root password file were both read. What is left is to check that
-# neither secret reaches the process arguments, readable through /proc/<pid>/cmdline.
-TOKEN=$(kubectl get secret arcadedb-credentials-secret \
-  -n "$NAMESPACE" \
-  -o jsonpath='{.data.clusterToken}' | base64 -d)
-[[ -n "$TOKEN" ]] || { echo "ERROR: clusterToken key is empty or missing in arcadedb-credentials-secret"; exit 1; }
-
+# The cluster just formed quorum (phase 3) with these settings, and every pod
+# accepted the root password from the Secret (assert_quorum_n logs in to each),
+# so the server read the password the way the chart handed it over. What is left
+# is to check that it took the expected route and that no secret reaches the
+# process arguments, readable through /proc/<pid>/cmdline.
 if [[ "$IMAGE_FLAVOR" == "native" ]]; then
   # No shell in the native image to read /proc from; the pod spec is checked instead.
-  echo "==> [9/11] Asserting credentials are passed as files (pod spec, native image)..."
+  echo "==> [9/12] Asserting credentials stay off the command line (pod spec, native image)..."
   CMDLINE=$(kubectl get pod -n "$NAMESPACE" "${RELEASE}-0" \
     -o jsonpath='{range .spec.containers[0].command[*]}{@}{"\n"}{end}')
 else
-  echo "==> [9/11] Asserting credentials are passed as files, not on the command line..."
+  echo "==> [9/12] Asserting credentials stay off the command line..."
   CMDLINE=$(kubectl exec -n "$NAMESPACE" "${RELEASE}-0" -- \
     sh -c 'tr "\0" "\n" </proc/1/cmdline')
 fi
 
-grep -q -- '^-Darcadedb.server.rootPasswordPath=' <<<"$CMDLINE" || {
-  echo "ERROR: the server is not started with -Darcadedb.server.rootPasswordPath"; exit 1; }
-grep -q -- '^-Darcadedb.ha.clusterTokenPath=' <<<"$CMDLINE" || {
-  echo "ERROR: the server is not started with -Darcadedb.ha.clusterTokenPath"; exit 1; }
 if grep -q -- '^-Darcadedb.server.rootPassword=' <<<"$CMDLINE" \
-   || grep -qF -- "$PASSWORD" <<<"$CMDLINE" \
-   || grep -qF -- "$TOKEN" <<<"$CMDLINE"; then
-  echo "ERROR: the root password or the cluster token appears in the server's process arguments"
+   || grep -qF -- "$PASSWORD" <<<"$CMDLINE"; then
+  echo "ERROR: the root password appears in the server's process arguments"
   exit 1
 fi
-echo "    Root password and cluster token are read from files; neither is in the arguments."
+
+if [[ "$ROOT_PASSWORD_FROM" == "env" ]]; then
+  # Pre-26.11.1 HA fallback (#45): those servers derive the cluster token from the
+  # arcadedb.server.rootPassword setting only, so the chart mounts no password or
+  # token file and exports the setting as an env var named after its key. Phase 12
+  # checks that the nodes derived matching tokens from it.
+  if grep -q -- '^-Darcadedb.server.rootPasswordPath=' <<<"$CMDLINE" \
+     || grep -q -- '^-Darcadedb.ha.clusterTokenPath=' <<<"$CMDLINE"; then
+    echo "ERROR: expected the env-var fallback, but the server reads a password or token file;"
+    echo "       is image.tag older than 26.11.1, and is no cluster token Secret set?"
+    exit 1
+  fi
+  ENV_REF=$(kubectl get pod -n "$NAMESPACE" "${RELEASE}-0" -o json \
+    | jq -r '.spec.containers[0].env[]? | select(.name == "arcadedb.server.rootPassword")
+             | if .value != null then "literal value"
+               else "\(.valueFrom.secretKeyRef.name // "")/\(.valueFrom.secretKeyRef.key // "")" end')
+  if [[ "$ENV_REF" != "${ROOT_PASSWORD_SECRET}/${ROOT_PASSWORD_KEY}" ]]; then
+    echo "ERROR: env var arcadedb.server.rootPassword should come from secret ${ROOT_PASSWORD_SECRET}/${ROOT_PASSWORD_KEY}, got '${ENV_REF:-<absent>}'"
+    exit 1
+  fi
+  echo "    Root password passed as env var arcadedb.server.rootPassword from ${ENV_REF}; no file, not in the arguments."
+else
+  TOKEN=$(kubectl get secret arcadedb-credentials-secret \
+    -n "$NAMESPACE" \
+    -o jsonpath='{.data.clusterToken}' | base64 -d)
+  [[ -n "$TOKEN" ]] || { echo "ERROR: clusterToken key is empty or missing in arcadedb-credentials-secret"; exit 1; }
+
+  grep -q -- '^-Darcadedb.server.rootPasswordPath=' <<<"$CMDLINE" || {
+    echo "ERROR: the server is not started with -Darcadedb.server.rootPasswordPath"; exit 1; }
+  grep -q -- '^-Darcadedb.ha.clusterTokenPath=' <<<"$CMDLINE" || {
+    echo "ERROR: the server is not started with -Darcadedb.ha.clusterTokenPath"; exit 1; }
+  if grep -qF -- "$TOKEN" <<<"$CMDLINE"; then
+    echo "ERROR: the cluster token appears in the server's process arguments"
+    exit 1
+  fi
+  echo "    Root password and cluster token are read from files; neither is in the arguments."
+fi
 
 # ── phase 10: logging configuration is loaded (issue #38) ────────────────────
 
-echo "==> [10/11] Asserting the server loaded the chart's logging configuration..."
+echo "==> [10/12] Asserting the server loaded the chart's logging configuration..."
 POD="${RELEASE}-0"
 
 # The arcadedb-config volume hides the image's config/arcadedb-log.properties.
@@ -415,7 +465,7 @@ POD="${RELEASE}-0"
 INIT_NAMES=$(kubectl get pod -n "$NAMESPACE" "$POD" \
   -o jsonpath='{.spec.initContainers[*].name}')
 if [[ "$IMAGE_FLAVOR" == "native" ]]; then
-  echo "==> [11/11] Asserting server-groups.json was seeded on the native image..."
+  echo "==> [11/12] Asserting server-groups.json was seeded on the native image..."
   # The native image has no shell, so config-seed runs the JVM image of the same
   # version (#49), and the file cannot be read with kubectl exec. Check that the
   # init container ran the JVM image, that it left server-groups.json on the
@@ -450,7 +500,7 @@ if [[ "$IMAGE_FLAVOR" == "native" ]]; then
   fi
   echo "    The server loaded the readonly group from the seeded server-groups.json."
 else
-  echo "==> [11/11] Asserting the image's server-groups.json was seeded..."
+  echo "==> [11/12] Asserting the image's server-groups.json was seeded..."
   # The arcadedb-config volume hides the image's config/. Without the seed the
   # server uses its built-in groups, which has no readonly group.
   # The CI install keeps the default arcadedb.configDirectory.
@@ -462,6 +512,36 @@ else
   }
   echo "    server-groups.json holds the image's readonly group."
 fi
+
+# ── phase 12: write via a follower (issue #54) ──────────────────────────────
+
+# A follower forwards the write to the leader, authenticating with the cluster
+# token. In the env-var fallback every node derives that token from the root
+# password setting, so this is where a node that failed to read it would show.
+FOLLOWER_ORDINAL=""
+for i in 0 1 2; do
+  [[ "$i" == "$LEADER_ORDINAL" ]] || { FOLLOWER_ORDINAL=$i; break; }
+done
+echo "==> [12/12] Writing via follower pod-${FOLLOWER_ORDINAL}, reading back on leader pod-${LEADER_ORDINAL}..."
+PF_PID=$(pf_start "$FOLLOWER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to follower pod-${FOLLOWER_ORDINAL} failed"; exit 1; }
+api "$HTTP_PORT" POST /api/v1/command/integration-test \
+  '{"language":"sql","command":"INSERT INTO TestDoc SET name = '\''via-follower'\''"}' \
+  >/dev/null || { echo "ERROR: write via follower pod-${FOLLOWER_ORDINAL} failed"; exit 1; }
+pf_stop "$PF_PID"
+
+PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
+FOLLOWER_RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
+  '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''via-follower'\''"}' \
+  | jq -r '.result[0].name // empty') || FOLLOWER_RESULT=""
+pf_stop "$PF_PID"
+
+[[ "$FOLLOWER_RESULT" == "via-follower" ]] || {
+  echo "ERROR: the write via follower pod-${FOLLOWER_ORDINAL} is not on the leader (got '${FOLLOWER_RESULT:-<empty>}')"
+  exit 1
+}
+echo "    Write via follower reached the leader."
 
 # Two more phases, helm-upgrade scale-up 3->5 and snapshot-install recovery (once
 # numbered 9 and 10, before phases 9 and 10 above took those numbers), were planned

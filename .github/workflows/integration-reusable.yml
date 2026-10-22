@@ -15,6 +15,19 @@ on:
         description: "image.flavor to install (jvm or native)."
         type: string
         default: "jvm"
+      rootPasswordSecret:
+        description: >-
+          Name of a root password Secret to create and install with
+          (arcadedb.credentials.rootPassword.secret.name). Empty = the
+          chart-generated arcadedb-credentials-secret.
+        type: string
+        default: ""
+      rootPasswordFrom:
+        description: >-
+          How the chart must hand the root password to the server: file
+          (rootPasswordPath) or env (the pre-26.11.1 HA fallback, issue #45).
+        type: string
+        default: "file"
 
 permissions:
   contents: read
@@ -59,20 +72,43 @@ jobs:
       - name: Create kind cluster
         run: kind create cluster --wait 60s
 
-      - name: Install chart
+      - name: Create root password Secret
+        if: inputs.rootPasswordSecret != ''
+        env:
+          SECRET_NAME: ${{ inputs.rootPasswordSecret }}
         run: |
+          kubectl create secret generic "$SECRET_NAME" \
+            --from-literal=password="$(openssl rand -hex 16)"
+
+      - name: Install chart
+        env:
+          SECRET_NAME: ${{ inputs.rootPasswordSecret }}
+        run: |
+          CREDENTIALS_ARGS=()
+          if [[ -n "$SECRET_NAME" ]]; then
+            # No arcadedb.credentials.clusterToken: a user-supplied root password
+            # Secret makes the dedicated token opt-in.
+            CREDENTIALS_ARGS=(
+              --set-string arcadedb.credentials.rootPassword.secret.name="$SECRET_NAME"
+              --set-string arcadedb.credentials.rootPassword.secret.key=password
+            )
+          fi
           helm install test-arcadedb charts/arcadedb/ \
             --set replicaCount=3 \
             --set arcadedb.defaultDatabases="" \
             --set image.tag="${{ inputs.imageTag }}" \
             --set image.pullPolicy="${{ inputs.pullPolicy }}" \
             --set image.flavor="${{ inputs.flavor }}" \
+            "${CREDENTIALS_ARGS[@]}" \
             --timeout 5m \
             --wait
 
       - name: Run integration tests
         env:
           IMAGE_FLAVOR: ${{ inputs.flavor }}
+          ROOT_PASSWORD_SECRET: ${{ inputs.rootPasswordSecret }}
+          ROOT_PASSWORD_KEY: ${{ inputs.rootPasswordSecret != '' && 'password' || '' }}
+          ROOT_PASSWORD_FROM: ${{ inputs.rootPasswordFrom }}
         run: make test-integration
 
       - name: Delete kind cluster
