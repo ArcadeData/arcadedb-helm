@@ -1,0 +1,6 @@
+# -Darcadedb.* keys the chart renders although the targeted server image has no
+# such setting. ci/check-config-keys.sh skips them. Every entry names the issue
+# tracking the fix; remove it once the chart stops rendering the key or the
+# server learns it (the check fails on an allowlisted key the image knows).
+
+arcadedb.gremlin.port  # #47: the Gremlin plugin reads its port from gremlin-server.yaml, not from this -D

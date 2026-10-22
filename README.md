@@ -21,7 +21,9 @@ See [charts/arcadedb/README.md](charts/arcadedb/README.md) and [charts/arcadedb/
 The database directory, the config directory (users, groups, API tokens) and,
 when HA is active, the Raft log are each persisted on a per-replica PVC by
 default (`persistence.enabled`, `persistence.config.enabled`,
-`persistence.raft.enabled`). Logs and `/tmp` stay on `emptyDir`. Disabling a
+`persistence.raft.enabled`). Logs and `/tmp` stay on `emptyDir`. Backups go to
+`arcadedb.backupDirectory`, on the `/tmp` `emptyDir` unless
+`persistence.backups.enabled` gives them a PVC. Disabling a
 `persistence.*` flag backs that directory with an `emptyDir` and the install
 notes warn that it is ephemeral. Extra claims go under `volumeClaimTemplates`.
 
@@ -66,9 +68,10 @@ For non-Operator Prometheus, use annotation discovery instead:
 **Structured JSON logging:** `--set observability.logging.format=json`
 
 The liveness probe uses the dependency-free `/api/v1/health` endpoint;
-readiness stays on `/api/v1/ready`. Set
-`observability.health.readinessRequiresHA=true` to gate readiness on Raft
-membership in HA clusters.
+readiness stays on `/api/v1/ready`. In HA clusters readiness is gated on Raft
+membership and catch-up by default (`observability.health.readinessRequiresHA`
+follows HA unless set explicitly), so a rolling restart never drops the write
+quorum.
 
 ## Development
 
@@ -78,11 +81,17 @@ Run checks locally:
 make help              # list available targets
 make lint              # helm lint
 make test-unit         # helm-unittest suites (auto-installs the plugin)
+make test-config-keys  # rendered -Darcadedb.* keys exist in the server image (requires Docker)
 make test-integration  # kind-based end-to-end tests (requires Docker)
 make test              # run all of the above
 ```
 
 Unit-test suites live in `charts/arcadedb/tests/` and use [helm-unittest](https://github.com/helm-unittest/helm-unittest). The plugin version is pinned in the `Makefile`.
+
+`make test-config-keys` renders the chart with representative values and checks that every `-Darcadedb.*` setting it
+passes still exists in the server's `GlobalConfiguration` (the appVersion image by default, `IMAGE_TAG=...` to pick
+another). The server ignores an unknown `-D` property silently, so a renamed setting would otherwise go unnoticed.
+Known exceptions live in `ci/config-keys-allowlist.txt`, each with its tracking issue.
 
 ### Latest-image guard
 

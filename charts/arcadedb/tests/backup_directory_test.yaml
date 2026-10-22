@@ -1,0 +1,251 @@
+suite: Backup directory (#42)
+templates:
+  - statefulset.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  - it: passes arcadedb.server.backupDirectory by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.backupDirectory=/home/arcadedb/backups
+
+  # Under readOnlyRootFilesystem the directory must sit on a writable volume.
+  - it: by default mounts the backup directory on the arcadedb-tmp emptyDir under a subPath
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-tmp
+            mountPath: /home/arcadedb/backups
+            subPath: backups
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: arcadedb-tmp, emptyDir: {} }
+      - notContains:
+          path: spec.volumeClaimTemplates
+          any: true
+          content:
+            metadata:
+              name: arcadedb-backups
+
+  - it: the backup directory and its mount follow arcadedb.backupDirectory
+    set:
+      arcadedb.backupDirectory: /data/backups
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.backupDirectory=/data/backups
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-tmp
+            mountPath: /data/backups
+            subPath: backups
+
+  - it: persistence.backups.enabled mounts a generated arcadedb-backups PVC
+    set:
+      persistence.backups.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-backups
+            mountPath: /home/arcadedb/backups
+      - contains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: arcadedb-backups
+            spec:
+              accessModes: [ReadWriteOnce]
+              resources:
+                requests:
+                  storage: 8Gi
+      - notContains:
+          path: spec.template.spec.volumes
+          any: true
+          content:
+            name: arcadedb-backups
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-tmp
+            mountPath: /home/arcadedb/backups
+            subPath: backups
+
+  - it: backups PVC size, accessMode and storageClass overrides flow through
+    set:
+      persistence.backups.enabled: true
+      persistence.backups.size: 50Gi
+      persistence.backups.accessMode: ReadWriteMany
+      persistence.backups.storageClass: nfs
+    asserts:
+      - contains:
+          path: spec.volumeClaimTemplates
+          content:
+            metadata:
+              name: arcadedb-backups
+            spec:
+              accessModes: [ReadWriteMany]
+              resources:
+                requests:
+                  storage: 50Gi
+              storageClassName: nfs
+
+  - it: a user volumeClaimTemplate named arcadedb-backups is mounted at the backup directory
+    set:
+      volumeClaimTemplates:
+        - metadata: { name: arcadedb-backups }
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources: { requests: { storage: 20Gi } }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-backups
+            mountPath: /home/arcadedb/backups
+      - notContains:
+          path: spec.template.spec.volumes
+          any: true
+          content:
+            name: arcadedb-backups
+
+  - it: a user volume named arcadedb-backups is mounted at the backup directory
+    set:
+      volumes:
+        - name: arcadedb-logs
+          emptyDir: {}
+        - name: arcadedb-tmp
+          emptyDir: {}
+        - name: arcadedb-backups
+          persistentVolumeClaim:
+            claimName: shared-backups
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-backups
+            mountPath: /home/arcadedb/backups
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-backups
+            persistentVolumeClaim:
+              claimName: shared-backups
+
+  - it: a volumes override without arcadedb-tmp backs the backup directory with its own emptyDir
+    set:
+      volumes:
+        - name: arcadedb-logs
+          emptyDir: {}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-backups
+            mountPath: /home/arcadedb/backups
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: arcadedb-backups, emptyDir: {} }
+
+  - it: a volumeMounts entry that covers the backup directory wins and the chart mounts nothing
+    set:
+      volumeMounts:
+        - name: arcadedb-data
+          mountPath: /home/arcadedb/databases
+        - name: arcadedb-config
+          mountPath: /home/arcadedb/config
+        - name: arcadedb-logs
+          mountPath: /home/arcadedb/log
+        - name: arcadedb-tmp
+          mountPath: /tmp
+        - name: arcadedb-raft
+          mountPath: /home/arcadedb/raft
+        - name: nfs-backups
+          mountPath: /home/arcadedb/backups
+      volumes:
+        - name: arcadedb-logs
+          emptyDir: {}
+        - name: arcadedb-tmp
+          emptyDir: {}
+        - name: nfs-backups
+          nfs: { server: nfs.local, path: /exports/arcadedb }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.backupDirectory=/home/arcadedb/backups
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          any: true
+          content:
+            subPath: backups
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          any: true
+          content:
+            name: arcadedb-backups
+      - notContains:
+          path: spec.template.spec.volumes
+          any: true
+          content:
+            name: arcadedb-backups
+
+  - it: an empty backupDirectory passes no flag and mounts nothing
+    set:
+      arcadedb.backupDirectory: ""
+      persistence.backups.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.backupDirectory=/home/arcadedb/backups
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          any: true
+          content:
+            mountPath: /home/arcadedb/backups
+      - notContains:
+          path: spec.volumeClaimTemplates
+          any: true
+          content:
+            metadata:
+              name: arcadedb-backups
+
+  # The server opens every directory under databaseDirectory as a database.
+  - it: fails when the backup directory is inside the database directory
+    set:
+      arcadedb.backupDirectory: /home/arcadedb/databases/backups
+    asserts:
+      - failedTemplate:
+          errorPattern: "arcadedb.backupDirectory \\(/home/arcadedb/databases/backups\\) must be outside arcadedb.databaseDirectory"
+
+  - it: fails when the backup directory is the database directory
+    set:
+      arcadedb.backupDirectory: /home/arcadedb/databases/
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be outside arcadedb.databaseDirectory"
+
+  - it: a sibling path sharing the database directory prefix is accepted
+    set:
+      arcadedb.backupDirectory: /home/arcadedb/databases-backups
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.backupDirectory=/home/arcadedb/databases-backups
+
+  - it: native flavor passes the backup directory too
+    set:
+      image.flavor: native
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.backupDirectory=/home/arcadedb/backups
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-tmp
+            mountPath: /home/arcadedb/backups
+            subPath: backups
