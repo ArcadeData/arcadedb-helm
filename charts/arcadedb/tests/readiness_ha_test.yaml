@@ -1,0 +1,72 @@
+suite: HA readiness default (#42)
+templates:
+  - statefulset.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  - it: HA via replicaCount turns readinessRequiresHA on by default
+    set:
+      replicaCount: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessRequiresHA=true
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessHAMaxLag=100
+
+  - it: HA via autoscaling turns readinessRequiresHA on by default
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 2
+      autoscaling.maxReplicas: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessRequiresHA=true
+
+  - it: an explicit false still wins on an HA cluster
+    set:
+      replicaCount: 3
+      observability.health.readinessRequiresHA: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessRequiresHA=true
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessHAMaxLag=100
+
+  - it: a single node leaves readinessRequiresHA off by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessRequiresHA=true
+
+  - it: an explicit true still applies on a single node
+    set:
+      observability.health.readinessRequiresHA: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessRequiresHA=true
+
+  - it: the HA default carries a custom readinessHAMaxLag
+    set:
+      replicaCount: 3
+      observability.health.readinessHAMaxLag: 10
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessHAMaxLag=10
+
+  # helm upgrade --reuse-values from a release whose values predate the null default
+  - it: a null health map still follows HA
+    set:
+      replicaCount: 3
+      observability.health: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.readinessRequiresHA=true

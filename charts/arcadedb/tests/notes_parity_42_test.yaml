@@ -1,0 +1,59 @@
+suite: NOTES.txt backups and HA readiness (#42)
+templates:
+  - NOTES.txt
+release:
+  name: test
+  namespace: default
+tests:
+  - it: does not warn about HA readiness on a default HA install
+    set:
+      replicaCount: 3
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "readinessRequiresHA is false"
+
+  - it: warns when readinessRequiresHA is turned off on an HA cluster
+    set:
+      replicaCount: 3
+      observability.health.readinessRequiresHA: false
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: observability.health.readinessRequiresHA is false on an HA cluster"
+
+  - it: does not warn about HA readiness on a single node with it off
+    set:
+      observability.health.readinessRequiresHA: false
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "readinessRequiresHA is false"
+
+  - it: warns that scheduled backups are ephemeral when persistence.backups is off
+    set:
+      arcadedb.backupConfigMap: backup
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: arcadedb-backups is backed by an emptyDir"
+
+  - it: does not warn about scheduled backups on a backups PVC
+    set:
+      arcadedb.backupConfigMap: backup
+      persistence.backups.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "EPHEMERAL"
+
+  - it: warns about scheduled backups on a dedicated emptyDir fallback too
+    set:
+      arcadedb.backupConfigMap: backup
+      volumes:
+        - name: arcadedb-logs
+          emptyDir: {}
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: arcadedb-backups is backed by an emptyDir"
