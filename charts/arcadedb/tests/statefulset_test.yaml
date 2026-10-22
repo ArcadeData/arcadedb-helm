@@ -1547,15 +1547,24 @@ tests:
           path: spec.template.spec.containers[0].command
           content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
 
-  - it: HA with a user-supplied root password Secret and no token keeps the derived token and the inline password on pre-26.11.1 images
+  - it: HA with a user-supplied root password Secret and no token keeps the derived token and passes the password as an env var on pre-26.11.1 images
     set:
       replicaCount: 3
       arcadedb.credentials.rootPassword.secret.name: my-secret
       arcadedb.credentials.rootPassword.secret.key: my-key
     asserts:
-      - contains:
+      # issue #45: was `contains -Darcadedb.server.rootPassword=$(rootPassword)`
+      - notContains:
           path: spec.template.spec.containers[0].command
           content: -Darcadedb.server.rootPassword=$(rootPassword)
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.server.rootPassword
+            valueFrom:
+              secretKeyRef:
+                name: my-secret
+                key: my-key
       - notContains:
           path: spec.template.spec.containers[0].command
           content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
@@ -1680,16 +1689,25 @@ tests:
           path: spec.template.spec.containers[0].command
           content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
 
-  - it: a non-version tag falls back to the inline root password when HA has no explicit token
+  - it: a non-version tag falls back to the root password setting env var when HA has no explicit token
     set:
       replicaCount: 3
       image.tag: latest
       arcadedb.credentials.rootPassword.secret.name: my-secret
       arcadedb.credentials.rootPassword.secret.key: my-key
     asserts:
-      - contains:
+      # issue #45: was `contains -Darcadedb.server.rootPassword=$(rootPassword)`
+      - notContains:
           path: spec.template.spec.containers[0].command
           content: -Darcadedb.server.rootPassword=$(rootPassword)
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.server.rootPassword
+            valueFrom:
+              secretKeyRef:
+                name: my-secret
+                key: my-key
 
   - it: arcadedb.credentials.mountPath is configurable and the -D paths follow it
     set:
@@ -1753,3 +1771,120 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken
+
+  # --- issue #45: the pre-26.11.1 HA fallback keeps the password off the command line ---
+
+  - it: "#45 the HA fallback renders no -D flag carrying the root password"
+    set:
+      replicaCount: 3
+      image.tag: "26.10.2"
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].command[*]
+          pattern: ^-Darcadedb\.server\.rootPassword=
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.server.rootPassword
+            valueFrom:
+              secretKeyRef:
+                name: my-secret
+                key: my-key
+
+  - it: "#45 the HA fallback under autoscaling also passes the password as an env var"
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 3
+      autoscaling.maxReplicas: 5
+      image.tag: "26.10.2"
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].command[*]
+          pattern: ^-Darcadedb\.server\.rootPassword=
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.server.rootPassword
+            valueFrom:
+              secretKeyRef:
+                name: my-secret
+                key: my-key
+
+  - it: "#45 the HA fallback on a native image also passes the password as an env var"
+    set:
+      replicaCount: 3
+      image.flavor: native
+      image.tag: "26.10.2-native"
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].command[*]
+          pattern: ^-Darcadedb\.server\.rootPassword=
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.server.rootPassword
+            valueFrom:
+              secretKeyRef:
+                name: my-secret
+                key: my-key
+
+  - it: "#45 the HA fallback after an upgrade with --reuse-values (no clusterToken key) passes the password as an env var"
+    set:
+      replicaCount: 3
+      image.tag: "26.10.2"
+      arcadedb.credentials.clusterToken: null
+      arcadedb.credentials.mountPath: null
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].command[*]
+          pattern: ^-Darcadedb\.server\.rootPassword=
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.server.rootPassword
+            valueFrom:
+              secretKeyRef:
+                name: my-secret
+                key: my-key
+
+  - it: "#45 the root password setting env var is not set when the password file is used (single node)"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: arcadedb.server.rootPassword
+
+  - it: "#45 the root password setting env var is not set in HA with a mounted cluster token"
+    set:
+      replicaCount: 3
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: arcadedb.server.rootPassword
+
+  - it: "#45 the root password setting env var is not set from 26.11.1, where the server derives the token from the file"
+    set:
+      replicaCount: 3
+      image.tag: "26.11.1"
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: arcadedb.server.rootPassword

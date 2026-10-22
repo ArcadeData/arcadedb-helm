@@ -132,7 +132,9 @@ arcadedb:
         key: null
     ## @param arcadedb.credentials.mountPath Directory the root password and cluster token
     ## are mounted at as files. The server reads them through arcadedb.server.rootPasswordPath
-    ## and arcadedb.ha.clusterTokenPath, so neither appears in the process arguments.
+    ## and arcadedb.ha.clusterTokenPath, so neither appears in the process arguments. (HA on
+    ## an image older than 26.11.1 without a cluster token: the password is passed as the
+    ## env var arcadedb.server.rootPassword instead, still off the command line.)
     mountPath: /etc/arcadedb/secrets
 
   ## @section arcadedb.plugins

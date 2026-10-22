@@ -117,13 +117,6 @@ spec:
             - -Darcadedb.server.httpIncomingPort={{ .Values.service.http.port }}
             {{- if $passwordFromFile }}
             - -Darcadedb.server.rootPasswordPath={{ $credentialsDir }}/rootPassword
-            {{- else }}
-            {{- /*
-              HA on a pre-26.11.1 image with no explicit cluster token: the server
-              derives the token from the inline root password only, so the password
-              stays on the command line. Set arcadedb.credentials.clusterToken to drop it.
-            */}}
-            - -Darcadedb.server.rootPassword=$(rootPassword)
             {{- end }}
             - -Darcadedb.server.configDirectory={{ .Values.arcadedb.configDirectory }}
             - -Darcadedb.server.databaseDirectory={{ .Values.arcadedb.databaseDirectory }}
@@ -216,6 +209,22 @@ spec:
                   name: arcadedb-credentials-secret
                   key: rootPassword
               {{- end }}
+            {{- if not $passwordFromFile }}
+            {{- /*
+              Issue #45: HA on a pre-26.11.1 image with no explicit cluster token.
+              Those servers derive the token from the arcadedb.server.rootPassword
+              setting, not from rootPasswordPath, so the password file cannot be
+              used. The setting is passed as an environment variable named after
+              its key, which GlobalConfiguration reads when no system property of
+              that name is set, keeping it out of the process arguments.
+            */}}
+            {{- $rootPasswordSecret := include "arcadedb.credentials.rootPasswordSecret" . | fromYaml }}
+            - name: arcadedb.server.rootPassword
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $rootPasswordSecret.name }}
+                  key: {{ $rootPasswordSecret.key }}
+            {{- end }}
             {{- if not $native }}
             - name: ARCADEDB_LOG_DIR
               value: {{ .Values.arcadedb.logsDirectory | quote }}

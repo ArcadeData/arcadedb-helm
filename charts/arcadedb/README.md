@@ -145,9 +145,12 @@ root password makes it guessable and it cannot be rotated on its own. The chart 
   helm upgrade ... --set arcadedb.credentials.clusterToken.secret.name=arcadedb-cluster-token
   ```
 
-  Until then, on an image older than 26.11.1 the root password stays on the command line in HA mode: those servers
-  derive the token from `arcadedb.server.rootPassword` only. From 26.11.1 the server derives it from the password file
-  too, and the chart switches to the file whatever the token setting.
+  Until then, on an image older than 26.11.1 the chart cannot use the password file in HA mode: those servers derive the
+  token from the `arcadedb.server.rootPassword` setting only. The chart sets that setting through an environment
+  variable named after it, `arcadedb.server.rootPassword` (a `secretKeyRef` to the root password Secret), which the
+  server reads when no system property of that name is set, so the password still stays out of the process arguments.
+  From 26.11.1 the server derives the token from the password file too, and the chart switches to the file whatever
+  the token setting.
 
 Upgrading an HA release from a chart version that did not mount a token changes the token. During the rolling restart
 the restarted pods hold the new token and the others the old one, so commands forwarded between the two groups can be
