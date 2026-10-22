@@ -20,10 +20,11 @@
   echo "Visit http://127.0.0.1:8080 to use your application"
   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
 {{- end }}
-{{- if not .Values.persistence.enabled }}
+{{- with (include "arcadedb.persistence.plan" . | fromJson).ephemeral }}
 
-WARNING: persistence.enabled is false. Database data is EPHEMERAL and will be lost when pods restart.
-         Set persistence.enabled=true (the default) for any non-ephemeral deployment.
+WARNING: {{ join ", " . }} {{ if eq (len .) 1 }}is{{ else }}are{{ end }} backed by an emptyDir. That content is EPHEMERAL and will be lost when pods restart.
+         Enable persistence.enabled / persistence.config.enabled / persistence.raft.enabled (the defaults),
+         or back the volume yourself through volumeClaimTemplates or volumes, for any non-ephemeral deployment.
 {{- end }}
 {{- if .Values.securityContext.readOnlyRootFilesystem }}
 

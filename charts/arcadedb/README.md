@@ -114,10 +114,44 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 
 ### arcadedb.credentials
 
-| Name                                            | Description                   | Value |
-|-------------------------------------------------|-------------------------------|-------|
-| `arcadedb.credentials.rootPassword.secret.name` | Name of existing secret       | `nil` |
-| `arcadedb.credentials.rootPassword.secret.key`  | Key to use in existing secret | `nil` |
+| Name                                            | Description                                                                                                                       | Value                    |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|--------------------------|
+| `arcadedb.credentials.rootPassword.secret.name` | Name of existing secret                                                                                                           | `nil`                    |
+| `arcadedb.credentials.rootPassword.secret.key`  | Key to use in existing secret                                                                                                     | `nil`                    |
+| `arcadedb.credentials.clusterToken.secret.name` | Existing secret holding the HA cluster token. `nil` uses the generated `clusterToken` key, or none with a user-supplied root password secret | `nil`                    |
+| `arcadedb.credentials.clusterToken.secret.key`  | Key to use in the cluster token secret                                                                                            | `clusterToken`           |
+| `arcadedb.credentials.mountPath`                | Directory the root password and cluster token are mounted at as files                                                            | `/etc/arcadedb/secrets`  |
+
+#### Root password and HA cluster token
+
+The root password is mounted from its Secret as a file and passed with `-Darcadedb.server.rootPasswordPath`, so it does
+not appear in the process arguments (`/proc/<pid>/cmdline`, readable by anything in the pod). The `rootPassword`
+environment variable is still set, for `extraCommands` that reference `$(rootPassword)`.
+
+With HA active (`replicaCount > 1` or autoscaling), the nodes authenticate each other with a shared cluster token. Without
+an explicit one, every node derives it from the root password and the cluster name with a fixed public salt, so a weak
+root password makes it guessable and it cannot be rotated on its own. The chart mounts a dedicated token and passes
+`-Darcadedb.ha.clusterTokenPath`:
+
+- **Generated root password (default):** a random 64-character `clusterToken` key is added to
+  `arcadedb-credentials-secret`, and kept across `helm upgrade` like the root password. Like the root password, it is
+  regenerated on every render by `helm template` (e.g. ArgoCD); supply your own Secrets for GitOps workflows.
+- **User-supplied root password Secret:** the token is opt-in, so an existing Secret without the key does not leave the
+  pods stuck in `ContainerCreating`. Create one and point `arcadedb.credentials.clusterToken.secret` at it:
+
+  ```shell
+  kubectl create secret generic arcadedb-cluster-token --from-literal=clusterToken="$(openssl rand -hex 32)"
+  helm upgrade ... --set arcadedb.credentials.clusterToken.secret.name=arcadedb-cluster-token
+  ```
+
+  Until then, on an image older than 26.11.1 the root password stays on the command line in HA mode: those servers
+  derive the token from `arcadedb.server.rootPassword` only. From 26.11.1 the server derives it from the password file
+  too, and the chart switches to the file whatever the token setting.
+
+Upgrading an HA release from a chart version that did not mount a token changes the token. During the rolling restart
+the restarted pods hold the new token and the others the old one, so commands forwarded between the two groups can be
+rejected until the rollout completes. Rotating the token later (changing the Secret and restarting the StatefulSet)
+behaves the same way.
 
 ### image
 
@@ -289,14 +323,13 @@ This section is for setting up autoscaling more information can be found here: h
 | Name                   | Description                                                | Value            |
 |------------------------|------------------------------------------------------------|------------------|
 | `volumeMounts`         | Pod volume mounts, rendered verbatim.                      | see `values.yaml` |
-| `volumes`              | Pod volumes, rendered verbatim.                             | see `values.yaml` |
-| `volumeClaimTemplates` | StatefulSet per-replica PVCs, rendered verbatim. Empty by default. | `[]`       |
+| `volumes`              | Pod volumes. Defaults back logs and `/tmp`; the data / config / Raft volumes come from `persistence`. | see `values.yaml` |
+| `volumeClaimTemplates` | Extra per-replica PVCs, rendered after the ones generated from `persistence`. A reserved name replaces the generated claim. | `[]`       |
 
 ### persistence
 
-> **Not wired up.** Since the volumes refactor these values are only read by
-> `NOTES.txt`; they no longer create any PVC. Use `volumeClaimTemplates` instead
-> (see [Persistence](#persistence-1) below).
+Each enabled directory gets a generated per-replica `volumeClaimTemplates` entry; a disabled one falls back to an
+`emptyDir` and `NOTES.txt` warns that its content is lost on Pod restart. See [Persistence](#persistence-1).
 
 | Name                           | Description                                                                                      | Value           |
 |--------------------------------|--------------------------------------------------------------------------------------------------|-----------------|
@@ -304,10 +337,14 @@ This section is for setting up autoscaling more information can be found here: h
 | `persistence.size`             | PVC size.                                                                                        | `8Gi`           |
 | `persistence.accessMode`       | PVC access mode.                                                                                 | `ReadWriteOnce` |
 | `persistence.storageClass`     | StorageClass name. Empty string uses the cluster default.                                        | `""`            |
-| `persistence.config.enabled`   | Persist the config directory with a separate PVC.                                                | `false`         |
+| `persistence.config.enabled`   | Persist the config directory (users, groups, API tokens) with a separate PVC.                    | `true`          |
 | `persistence.config.size`      | PVC size for the config directory.                                                               | `1Gi`           |
 | `persistence.config.accessMode` | PVC access mode for the config directory.                                                        | `ReadWriteOnce` |
 | `persistence.config.storageClass` | StorageClass name for the config PVC. Empty uses the cluster default.                        | `""`            |
+| `persistence.raft.enabled`     | Persist the Raft log and snapshots with a separate PVC. Only rendered while HA is active.         | `true`          |
+| `persistence.raft.size`        | PVC size for the Raft directory.                                                                 | `1Gi`           |
+| `persistence.raft.accessMode`  | PVC access mode for the Raft directory.                                                          | `ReadWriteOnce` |
+| `persistence.raft.storageClass` | StorageClass name for the Raft PVC. Empty uses the cluster default.                             | `""`            |
 
 ### networkPolicy
 
@@ -398,45 +435,62 @@ helm install my-arcadedb ./arcadedb -f values.yaml
 
 ## Persistence
 
-Storage is fully value-driven: `volumes`, `volumeMounts`, and `volumeClaimTemplates` are rendered verbatim into the
-StatefulSet. The chart ships five reserved volumes, mounted at the directories the server actually uses:
+The chart ships five reserved volumes, mounted (through `volumeMounts`) at the directories the server actually uses:
 
-| Volume            | Mount path                 | Contents                      |
-|-------------------|----------------------------|-------------------------------|
-| `arcadedb-data`   | `/home/arcadedb/databases` | Databases                     |
-| `arcadedb-config` | `/home/arcadedb/config`    | Users, tokens, server settings |
-| `arcadedb-logs`   | `/home/arcadedb/log`       | Server logs                   |
-| `arcadedb-tmp`    | `/tmp`                     | Scratch space                 |
-| `arcadedb-raft`   | `/home/arcadedb/raft`      | Raft state (HA)               |
+| Volume            | Mount path                 | Contents                       | Backed by default with                        |
+|-------------------|----------------------------|--------------------------------|-----------------------------------------------|
+| `arcadedb-data`   | `/home/arcadedb/databases` | Databases                      | PVC (`persistence.enabled`, 8Gi)              |
+| `arcadedb-config` | `/home/arcadedb/config`    | Users, groups, tokens, settings | PVC (`persistence.config.enabled`, 1Gi)       |
+| `arcadedb-raft`   | `/home/arcadedb/raft`      | Raft log and snapshots (HA)    | PVC while HA is active (`persistence.raft.enabled`, 1Gi), else `emptyDir` |
+| `arcadedb-logs`   | `/home/arcadedb/log`       | Server logs                    | `emptyDir`                                    |
+| `arcadedb-tmp`    | `/tmp`                     | Scratch space                  | `emptyDir`                                    |
 
-**All five default to `emptyDir`, so nothing survives a Pod restart out of the box.** To persist a directory, drop its
-`emptyDir` entry from `volumes` and declare a `volumeClaimTemplates` entry of the same name — a StatefulSet auto-mounts a
-per-replica volume matching the claim name, so `volumeMounts` needs no change:
+For each enabled `persistence.*` directory the chart generates a per-replica `volumeClaimTemplates` entry of the same
+name, which the StatefulSet mounts in place of a pod volume. Setting a flag to `false` backs that directory with an
+`emptyDir` instead, and `NOTES.txt` warns that its content is lost when a Pod restarts. Raft storage is only used while
+HA is active (`replicaCount > 1` or `autoscaling.enabled`), so a single node gets no Raft PVC.
+
+To back a reserved directory yourself, either declare a `volumeClaimTemplates` entry with its name (it replaces the
+generated claim, whatever the flag says), or add a non-`emptyDir` entry with its name to `volumes`, such as a
+`hostPath` or an existing `persistentVolumeClaim`. An `emptyDir` entry for a reserved name in `volumes` is dropped
+while its persistence flag is on, so a values file copied from an older chart, which listed all five as `emptyDir`,
+still gets the PVCs.
 
 ```yaml
-volumes:
-  # arcadedb-data removed - backed by the claim template below
-  - name: arcadedb-config
-    emptyDir: {}
-  - name: arcadedb-logs
-    emptyDir: {}
-  - name: arcadedb-tmp
-    emptyDir: {}
-  - name: arcadedb-raft
-    emptyDir: {}
+persistence:
+  size: 50Gi
+  storageClass: fast-ssd
 
 volumeClaimTemplates:
+  # extra per-replica claim under your own name, with a matching volumeMounts entry
   - metadata:
-      name: arcadedb-data
+      name: arcadedb-backups
     spec:
       accessModes: [ReadWriteOnce]
       resources:
         requests:
-          storage: 8Gi
+          storage: 20Gi
 ```
 
-For a durable HA cluster, give `arcadedb-config` and `arcadedb-raft` claim templates too. You can also add claim templates
-under your own names (backups, replication) alongside a matching `volumeMounts` entry.
+### Upgrading from 26.10.2 or earlier
+
+Charts from the volumes refactor (#19) up to 26.10.2 ignored `persistence.*` and kept databases, config and Raft
+state on `emptyDir`, so those releases lose their data on every Pod restart. This chart moves them to PVCs, and a
+StatefulSet's `volumeClaimTemplates` cannot change in place: `helm upgrade` fails with
+`spec.volumeClaimTemplates: ... field is immutable`. To upgrade:
+
+1. Back up every database you need (for example with `BACKUP DATABASE`, or by exporting it); the new PVCs start empty.
+   Users and API tokens in the config directory are not carried over either.
+2. Delete the StatefulSet and its Pods: `kubectl delete statefulset <release>-arcadedb`.
+3. Run `helm upgrade`. The Pods are recreated with their PVCs.
+4. Restore the databases and recreate users and tokens.
+
+To keep the previous ephemeral behaviour instead, upgrade with `persistence.enabled=false`,
+`persistence.config.enabled=false` and `persistence.raft.enabled=false`; nothing about the StatefulSet's claims
+changes then. The same immutability applies later: turning a `persistence.*` flag on or off, changing a PVC size,
+or switching between a single node and HA (which adds or removes the Raft claim) on an installed release needs the
+StatefulSet recreated the same way. The PVCs themselves are kept when the StatefulSet or the release is deleted;
+remove them with `kubectl delete pvc` once the data is no longer needed.
 
 If you change `arcadedb.databaseDirectory`, `arcadedb.configDirectory`, `arcadedb.logsDirectory`, or
 `ha.raftStorageDirectory`, update the corresponding `volumeMounts` path to match.
@@ -460,23 +514,7 @@ group). It chowns on every start, so it also repairs a directory that is already
 `mountPath` is not `arcadedb.configDirectory` or one of its parents, or if `securityContext.runAsUser` is unset.
 
 ```yaml
-volumes:            # drop the arcadedb-config emptyDir
-  - name: arcadedb-data
-    emptyDir: {}
-  - name: arcadedb-logs
-    emptyDir: {}
-  - name: arcadedb-tmp
-    emptyDir: {}
-  - name: arcadedb-raft
-    emptyDir: {}
-volumeClaimTemplates:
-  - metadata:
-      name: arcadedb-config
-    spec:
-      accessModes: [ReadWriteOnce]
-      resources:
-        requests:
-          storage: 1Gi
+# arcadedb-config is a generated PVC by default (persistence.config.enabled)
 initContainers:
   configDirectory:
     volumeName: arcadedb-config

@@ -508,3 +508,148 @@ Returns YAML (possibly empty).
 {{ toYaml . }}
 {{- end }}
 {{- end -}}
+
+{{/*
+Returns "true" when Raft HA is active (replicaCount > 1 or autoscaling), "".
+Same condition the StatefulSet uses to emit the -Darcadedb.ha.* arguments.
+*/}}
+{{- define "arcadedb.ha.enabled" -}}
+{{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Secret and key holding the root password: the user-supplied one, else the
+chart-generated arcadedb-credentials-secret. Returns YAML {name, key}.
+*/}}
+{{- define "arcadedb.credentials.rootPasswordSecret" -}}
+{{- $s := .Values.arcadedb.credentials.rootPassword.secret -}}
+{{- if $s.name }}
+name: {{ $s.name }}
+key: {{ $s.key }}
+{{- else }}
+name: arcadedb-credentials-secret
+key: rootPassword
+{{- end }}
+{{- end -}}
+
+{{/*
+Secret and key holding the dedicated HA cluster token. Returns YAML {name, key},
+or nothing when there is none: a user-supplied root password Secret makes the
+token opt-in, since that Secret may not carry a clusterToken key and a missing
+key would leave the pods stuck in ContainerCreating after an upgrade.
+*/}}
+{{- define "arcadedb.credentials.clusterTokenSecret" -}}
+{{- $c := .Values.arcadedb.credentials -}}
+{{- $t := ($c.clusterToken | default dict).secret | default dict -}}
+{{- if $t.name }}
+name: {{ $t.name }}
+key: {{ $t.key | default "clusterToken" }}
+{{- else if not $c.rootPassword.secret.name }}
+name: arcadedb-credentials-secret
+key: clusterToken
+{{- end }}
+{{- end -}}
+
+{{/*
+Returns "true" when the cluster token file is mounted and passed with
+-Darcadedb.ha.clusterTokenPath: HA is active and a token Secret is known.
+*/}}
+{{- define "arcadedb.credentials.mountClusterToken" -}}
+{{- if and (include "arcadedb.ha.enabled" .) (include "arcadedb.credentials.clusterTokenSecret" . | trim) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Returns "true" when the image tag is a release at or after 26.11.1, the first
+server that derives the HA cluster token from arcadedb.server.rootPasswordPath
+(ArcadeData/arcadedb#10479). A tag without a leading x.y.z (latest, a digest
+alias) is treated as older.
+*/}}
+{{- define "arcadedb.image.derivesTokenFromPasswordFile" -}}
+{{- $version := regexFind "^[0-9]+\\.[0-9]+\\.[0-9]+" (include "arcadedb.image.tag" .) -}}
+{{- if and $version (semverCompare ">=26.11.1" $version) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Returns "true" when the root password is passed as a mounted file
+(-Darcadedb.server.rootPasswordPath) instead of on the command line, where it
+is readable through /proc/<pid>/cmdline. Before 26.11.1 an HA node derives its
+cluster token from the inline arcadedb.server.rootPassword only, so in HA the
+file is used only when an explicit token is mounted or the image derives the
+token from the file.
+*/}}
+{{- define "arcadedb.credentials.rootPasswordFromFile" -}}
+{{- if or (not (include "arcadedb.ha.enabled" .)) (include "arcadedb.credentials.mountClusterToken" .) (include "arcadedb.image.derivesTokenFromPasswordFile" .) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Group-readable (0440) when the pod has an fsGroup, which owns the projected
+files and is a supplementary group of every container process; world-readable
+(0444) otherwise, since a secret volume is owned by root and the server runs
+unprivileged. Decimal, because YAML 1.2 parsers read 0440 as a decimal number.
+*/}}
+{{- define "arcadedb.credentials.fileMode" -}}
+{{- if (.Values.podSecurityContext | default dict).fsGroup -}}288{{- else -}}292{{- end -}}
+{{- end -}}
+
+{{/*
+Storage plan for the reserved arcadedb-data / arcadedb-config / arcadedb-raft
+volumes (#34), returned as JSON:
+  claims    - volumeClaimTemplates the chart generates from persistence.*
+  volumes   - the pod volumes: the `volumes` value minus the emptyDir entries a
+              generated claim replaces, plus an emptyDir for every reserved name
+              nothing else backs
+  ephemeral - reserved names that end up on an emptyDir and hold state worth
+              keeping (arcadedb-raft only counts while HA is active)
+
+A reserved name the user backs explicitly - a `volumeClaimTemplates` entry, or a
+`volumes` entry that is not an emptyDir - is left alone. An emptyDir entry in
+`volumes` does not block persistence: values files copied from older charts list
+every reserved name as an emptyDir, and the persistence.* flags must still win.
+*/}}
+{{- define "arcadedb.persistence.plan" -}}
+{{- $ha := or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled -}}
+{{- $data := .Values.persistence | default dict -}}
+{{- $config := $data.config | default dict -}}
+{{- $raft := $data.raft | default dict -}}
+{{- $reserved := list
+      (dict "name" "arcadedb-data" "settings" $data "enabled" $data.enabled "stateful" true)
+      (dict "name" "arcadedb-config" "settings" $config "enabled" $config.enabled "stateful" true)
+      (dict "name" "arcadedb-raft" "settings" $raft "enabled" (and $ha $raft.enabled) "stateful" $ha) -}}
+{{- $userClaims := dict -}}
+{{- range .Values.volumeClaimTemplates -}}
+{{- with .metadata -}}{{- with .name -}}{{- $_ := set $userClaims . true -}}{{- end -}}{{- end -}}
+{{- end -}}
+{{- $userVolumes := dict -}}
+{{- range .Values.volumes -}}
+{{- with .name -}}{{- $_ := set $userVolumes . true -}}{{- end -}}
+{{- end -}}
+{{- $userEmptyDirs := dict -}}
+{{- range .Values.volumes -}}
+{{- if and .name (hasKey . "emptyDir") -}}{{- $_ := set $userEmptyDirs .name true -}}{{- end -}}
+{{- end -}}
+{{- $claims := list -}}
+{{- $generated := dict -}}
+{{- $fallback := list -}}
+{{- $ephemeral := list -}}
+{{- range $reserved -}}
+{{- $name := .name -}}
+{{- $userOwned := or (hasKey $userClaims $name) (and (hasKey $userVolumes $name) (not (hasKey $userEmptyDirs $name))) -}}
+{{- if $userOwned -}}
+{{- else if .enabled -}}
+{{- $spec := dict "accessModes" (list .settings.accessMode) "resources" (dict "requests" (dict "storage" .settings.size)) -}}
+{{- with .settings.storageClass -}}{{- $_ := set $spec "storageClassName" . -}}{{- end -}}
+{{- $claims = append $claims (dict "metadata" (dict "name" $name) "spec" $spec) -}}
+{{- $_ := set $generated $name true -}}
+{{- else -}}
+{{- if not (hasKey $userVolumes $name) -}}
+{{- $fallback = append $fallback (dict "name" $name "emptyDir" dict) -}}
+{{- end -}}
+{{- if .stateful -}}{{- $ephemeral = append $ephemeral $name -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $volumes := list -}}
+{{- range .Values.volumes -}}
+{{- if not (and .name (hasKey $generated .name)) -}}{{- $volumes = append $volumes . -}}{{- end -}}
+{{- end -}}
+{{- dict "claims" $claims "volumes" (concat $fallback $volumes) "ephemeral" $ephemeral | toJson -}}
+{{- end -}}

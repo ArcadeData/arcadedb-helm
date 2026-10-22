@@ -145,14 +145,14 @@ PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
-echo "==> [1/9] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
+echo "==> [1/10] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
 echo "    All 3 pods Ready."
 
 # ── phase 2: liveness health probe ────────────────────────────────────────────
 
-echo "==> [2/9] Asserting /api/v1/health liveness endpoint..."
+echo "==> [2/10] Asserting /api/v1/health liveness endpoint..."
 PF_PID=$(pf_start 0 "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to pod-0 failed"; exit 1; }
 assert_health_204 "$HTTP_PORT" || exit 1
@@ -160,14 +160,14 @@ pf_stop "$PF_PID"
 
 # ── phase 3: raft formation ───────────────────────────────────────────────────
 
-echo "==> [3/9] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+echo "==> [3/10] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
 assert_quorum_n 3 || exit 1
 
 # ── phase 4: write ────────────────────────────────────────────────────────────
 
 # LEADER_ORDINAL is set by assert_quorum_n above.
 
-echo "==> [4/9] Writing test data via leader pod-${LEADER_ORDINAL}..."
+echo "==> [4/10] Writing test data via leader pod-${LEADER_ORDINAL}..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
 
@@ -187,7 +187,7 @@ echo "    Write complete."
 
 # ── phase 5: read and assert ──────────────────────────────────────────────────
 
-echo "==> [5/9] Reading back test data..."
+echo "==> [5/10] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
   | jq -r '.result[0].name // empty') || {
@@ -206,7 +206,7 @@ echo "    Got: '${RESULT}'"
 
 # ── phase 6: STATUS column ────────────────────────────────────────────────────
 
-echo "==> [6/9] Asserting STATUS=HEALTHY for all peers..."
+echo "==> [6/10] Asserting STATUS=HEALTHY for all peers..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -216,7 +216,7 @@ pf_stop "$PF_PID"
 
 # ── phase 7: leadership transfer ──────────────────────────────────────────────
 
-echo "==> [7/9] Transferring Raft leadership..."
+echo "==> [7/10] Transferring Raft leadership..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -289,9 +289,9 @@ LEADER_ORDINAL=$NEW_LEADER_ORDINAL
 if [[ "$IMAGE_FLAVOR" == "native" ]]; then
   # The native image has no shell and no bin/console.sh, and the chart sets no
   # ARCADEDB_SETTINGS for it, so there is nothing for this phase to exercise.
-  echo "==> [8/9] Skipped: the native image has no shell or console."
+  echo "==> [8/10] Skipped: the native image has no shell or console."
 else
-  echo "==> [8/9] Asserting the console can write its history file..."
+  echo "==> [8/10] Asserting the console can write its history file..."
   POD="${RELEASE}-0"
 
   # bin/console.sh asks JLine for the relative history file ".history", resolved
@@ -346,9 +346,42 @@ else
   echo "    bin/console.sh runs inside the pod."
 fi
 
-# ── phase 9: logging configuration is loaded (issue #38) ─────────────────────
+# ── phase 9: credentials stay off the command line (issue #35) ──────────────
 
-echo "==> [9/9] Asserting the server loaded the chart's logging configuration..."
+# The cluster just formed quorum (phase 3) with these settings, so the token file
+# and the root password file were both read. What is left is to check that
+# neither secret reaches the process arguments, readable through /proc/<pid>/cmdline.
+TOKEN=$(kubectl get secret arcadedb-credentials-secret \
+  -n "$NAMESPACE" \
+  -o jsonpath='{.data.clusterToken}' | base64 -d)
+[[ -n "$TOKEN" ]] || { echo "ERROR: clusterToken key is empty or missing in arcadedb-credentials-secret"; exit 1; }
+
+if [[ "$IMAGE_FLAVOR" == "native" ]]; then
+  # No shell in the native image to read /proc from; the pod spec is checked instead.
+  echo "==> [9/10] Asserting credentials are passed as files (pod spec, native image)..."
+  CMDLINE=$(kubectl get pod -n "$NAMESPACE" "${RELEASE}-0" \
+    -o jsonpath='{range .spec.containers[0].command[*]}{@}{"\n"}{end}')
+else
+  echo "==> [9/10] Asserting credentials are passed as files, not on the command line..."
+  CMDLINE=$(kubectl exec -n "$NAMESPACE" "${RELEASE}-0" -- \
+    sh -c 'tr "\0" "\n" </proc/1/cmdline')
+fi
+
+grep -q -- '^-Darcadedb.server.rootPasswordPath=' <<<"$CMDLINE" || {
+  echo "ERROR: the server is not started with -Darcadedb.server.rootPasswordPath"; exit 1; }
+grep -q -- '^-Darcadedb.ha.clusterTokenPath=' <<<"$CMDLINE" || {
+  echo "ERROR: the server is not started with -Darcadedb.ha.clusterTokenPath"; exit 1; }
+if grep -q -- '^-Darcadedb.server.rootPassword=' <<<"$CMDLINE" \
+   || grep -qF -- "$PASSWORD" <<<"$CMDLINE" \
+   || grep -qF -- "$TOKEN" <<<"$CMDLINE"; then
+  echo "ERROR: the root password or the cluster token appears in the server's process arguments"
+  exit 1
+fi
+echo "    Root password and cluster token are read from files; neither is in the arguments."
+
+# ── phase 10: logging configuration is loaded (issue #38) ────────────────────
+
+echo "==> [10/10] Asserting the server loaded the chart's logging configuration..."
 POD="${RELEASE}-0"
 
 # The arcadedb-config volume hides the image's config/arcadedb-log.properties.
@@ -376,14 +409,15 @@ else
   echo "    Server log written to the configured logs directory."
 fi
 
-# Phases once numbered 9 (helm-upgrade scale-up 3->5) and 10 (snapshot-install recovery) were
-# planned but discarded after CI proved the scenarios are not supported by the
-# current ArcadeDB image: a `helm upgrade --set replicaCount=5` rolling-restarts
+# Two more phases, helm-upgrade scale-up 3->5 and snapshot-install recovery (once
+# numbered 9 and 10, before phases 9 and 10 above took those numbers), were planned
+# but discarded after CI proved the scenarios are not supported by the current
+# ArcadeDB image: a `helm upgrade --set replicaCount=5` rolling-restarts
 # all StatefulSet pods AND adds two with a serverList of 5 entries, but Raft
 # does not auto-vote in the new peers (the support email confirms this requires
 # an explicit POST /api/v1/cluster/peer call from the leader). The cluster ends
 # up unable to re-form quorum after the rolling restart. The snapshot-install
-# phase depended on the post-scale-up cluster, so it was dropped with phase 9.
+# phase depended on the post-scale-up cluster, so it was dropped with the scale-up.
 # See docs/superpowers/specs/2026-05-09-ha-integration-tests-design.md for the
 # updated rationale.
 
