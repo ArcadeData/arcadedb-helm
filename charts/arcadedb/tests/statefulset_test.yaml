@@ -705,8 +705,8 @@ tests:
       - contains:
           path: spec.template.spec.volumes
           content: { name: arcadedb-raft, emptyDir: {} }
-      # logs, tmp, raft, plus the chart's arcadedb-credentials projected volume
-      - lengthEqual: { path: spec.template.spec.volumes, count: 4 }
+      # logs, tmp, raft, plus the chart's arcadedb-credentials and arcadedb-logging volumes
+      - lengthEqual: { path: spec.template.spec.volumes, count: 5 }
 
   - it: a non-emptyDir volume for a reserved name is kept and no PVC is generated for it
     set:

@@ -389,6 +389,35 @@ rendered verbatim and do not follow configDirectory on their own.
 {{- end -}}
 
 {{/*
+Logging configuration (issue #38). The image keeps arcadedb-log.properties in
+its config/ directory, which the arcadedb-config volume hides; the chart ships
+the file from a ConfigMap mounted outside configDirectory instead.
+
+arcadedb.logging.enabled returns "true" when the chart ships the file, "" when
+arcadedb.logging is off or null.
+*/}}
+{{- define "arcadedb.logging.enabled" -}}
+{{- if (.Values.arcadedb.logging | default dict).enabled -}}true{{- end -}}
+{{- end -}}
+
+{{- define "arcadedb.logging.configMapName" -}}
+{{- printf "%s-logging" (include "arcadedb.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "arcadedb.logging.properties" -}}
+{{- required "arcadedb.logging.properties must hold the arcadedb-log.properties content when arcadedb.logging.enabled is true" .Values.arcadedb.logging.properties | toString -}}
+{{- end -}}
+
+{{- define "arcadedb.logging.mountPath" -}}
+{{- $mountPath := trimSuffix "/" (required "arcadedb.logging.mountPath is required when arcadedb.logging.enabled is true" .Values.arcadedb.logging.mountPath) -}}
+{{- $configDir := trimSuffix "/" .Values.arcadedb.configDirectory -}}
+{{- if or (eq $mountPath $configDir) (hasPrefix (printf "%s/" $configDir) $mountPath) (hasPrefix (printf "%s/" $mountPath) $configDir) -}}
+{{- fail (printf "arcadedb.logging.mountPath (%s) must be outside arcadedb.configDirectory (%s): mounting the logging ConfigMap on, inside or above the config directory would hide it or the config volume" .Values.arcadedb.logging.mountPath .Values.arcadedb.configDirectory) -}}
+{{- end -}}
+{{- $mountPath -}}
+{{- end -}}
+
+{{/*
 Guard: scrape discovery (ServiceMonitor or pod annotations) needs the
 prometheus plugin so /prometheus is actually served.
 */}}
@@ -408,11 +437,15 @@ prometheus plugin so /prometheus is actually served.
 {{- end -}}
 
 {{/*
-Merge user-supplied podAnnotations with computed prometheus.io/* scrape
-annotations. Returns YAML (possibly empty).
+Merge user-supplied podAnnotations with the checksum/logging annotation and
+computed prometheus.io/* scrape annotations. Returns YAML (possibly empty).
 */}}
 {{- define "arcadedb.podAnnotations" -}}
 {{- $annotations := deepCopy (default dict .Values.podAnnotations) -}}
+{{- if include "arcadedb.logging.enabled" . -}}
+  {{- /* JUL reads the file once at startup: roll the pods when it changes. */ -}}
+  {{- $_ := set $annotations "checksum/logging" (include "arcadedb.logging.properties" . | sha256sum) -}}
+{{- end -}}
 {{- $pa := (((((.Values.observability | default dict).metrics | default dict).prometheus) | default dict).podAnnotations) | default dict -}}
 {{- if $pa.enabled -}}
   {{- $port := int .Values.service.http.port -}}

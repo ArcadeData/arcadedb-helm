@@ -102,6 +102,16 @@ spec:
             */}}
             - -Duser.dir={{ .Values.arcadedb.installDirectory }}
             {{- end }}
+            {{- if include "arcadedb.logging.enabled" . }}
+            {{- /*
+              Issue #38: the arcadedb-config volume hides the image's
+              config/arcadedb-log.properties. server.sh, and the native entrypoint
+              flags repeated above, name that hidden path first; the JVM and the
+              native binary keep the last value of a repeated -D, so this later
+              flag wins. It precedes extraCommands, which can still override it.
+            */}}
+            - -Djava.util.logging.config.file={{ include "arcadedb.logging.mountPath" . }}/arcadedb-log.properties
+            {{- end }}
             - -Darcadedb.dumpConfigAtStartup=true
             - -Darcadedb.server.name=$(HOSTNAME)
             - -Darcadedb.server.httpIncomingPort={{ .Values.service.http.port }}
@@ -163,6 +173,11 @@ spec:
             {{- if .Values.tls.enabled }}
             - name: tls-certs
               mountPath: {{ .Values.tls.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if include "arcadedb.logging.enabled" . }}
+            - name: arcadedb-logging
+              mountPath: {{ include "arcadedb.logging.mountPath" . }}
               readOnly: true
             {{- end }}
             {{- if $passwordFromFile }}
@@ -238,6 +253,11 @@ spec:
         - name: tls-certs
           secret:
             secretName: {{ include "arcadedb.tls.secretName" . }}
+        {{- end }}
+        {{- if include "arcadedb.logging.enabled" . }}
+        - name: arcadedb-logging
+          configMap:
+            name: {{ include "arcadedb.logging.configMapName" . }}
         {{- end }}
         {{- if $passwordFromFile }}
         {{- $rootPasswordSecret := include "arcadedb.credentials.rootPasswordSecret" . | fromYaml }}
