@@ -8,13 +8,23 @@ RAFT_TIMEOUT=60
 ROLLOUT_TIMEOUT=120
 # image.flavor the chart was installed with (jvm|native).
 IMAGE_FLAVOR=${IMAGE_FLAVOR:-jvm}
+# replicaCount the chart was installed with. 1 = a single node: no HA, no cluster
+# token, and the Raft phases (3, 6, 7, 12) are skipped.
+REPLICAS=${REPLICAS:-3}
+[[ "$REPLICAS" =~ ^[1-9][0-9]*$ ]] || {
+  echo "ERROR: REPLICAS must be a positive integer (got '${REPLICAS}')"; exit 1; }
 # Secret and key the root password was installed from. Empty name = the
 # chart-generated arcadedb-credentials-secret, which also carries clusterToken.
 ROOT_PASSWORD_SECRET=${ROOT_PASSWORD_SECRET:-}
 ROOT_PASSWORD_KEY=${ROOT_PASSWORD_KEY:-}
+# Secret and key of a user-supplied HA cluster token
+# (arcadedb.credentials.clusterToken.secret.*). Empty name = none.
+CLUSTER_TOKEN_SECRET=${CLUSTER_TOKEN_SECRET:-}
+CLUSTER_TOKEN_KEY=${CLUSTER_TOKEN_KEY:-clusterToken}
 # How the chart is expected to hand the root password to the server:
-#   file - -Darcadedb.server.rootPasswordPath plus -Darcadedb.ha.clusterTokenPath
-#          (the generated Secret, or an image >= 26.11.1)
+#   file - -Darcadedb.server.rootPasswordPath, plus -Darcadedb.ha.clusterTokenPath
+#          when a token is mounted (see EXPECT_TOKEN_SECRET below). In HA with a
+#          user-supplied Secret and no token this needs an image >= 26.11.1.
 #   env  - the arcadedb.server.rootPassword env var: HA on an image older than
 #          26.11.1 with a user-supplied Secret and no cluster token (issue #45)
 ROOT_PASSWORD_FROM=${ROOT_PASSWORD_FROM:-file}
@@ -24,9 +34,27 @@ case "$ROOT_PASSWORD_FROM" in
     [[ -n "$ROOT_PASSWORD_SECRET" && -n "$ROOT_PASSWORD_KEY" ]] || {
       echo "ERROR: ROOT_PASSWORD_FROM=env needs ROOT_PASSWORD_SECRET and ROOT_PASSWORD_KEY"
       exit 1
-    } ;;
+    }
+    if [[ -n "$CLUSTER_TOKEN_SECRET" ]] || (( REPLICAS == 1 )); then
+      echo "ERROR: ROOT_PASSWORD_FROM=env is only chosen in HA (REPLICAS > 1) without a cluster token"
+      exit 1
+    fi ;;
   *) echo "ERROR: ROOT_PASSWORD_FROM must be 'file' or 'env' (got '${ROOT_PASSWORD_FROM}')"; exit 1 ;;
 esac
+# The cluster token Secret the chart is expected to mount, mirroring
+# arcadedb.credentials.mountClusterToken: only in HA, and then the user-supplied
+# token, else the generated key unless a user root password Secret made it opt-in.
+EXPECT_TOKEN_SECRET=""
+EXPECT_TOKEN_KEY=""
+if (( REPLICAS > 1 )); then
+  if [[ -n "$CLUSTER_TOKEN_SECRET" ]]; then
+    EXPECT_TOKEN_SECRET=$CLUSTER_TOKEN_SECRET
+    EXPECT_TOKEN_KEY=$CLUSTER_TOKEN_KEY
+  elif [[ -z "$ROOT_PASSWORD_SECRET" ]]; then
+    EXPECT_TOKEN_SECRET=arcadedb-credentials-secret
+    EXPECT_TOKEN_KEY=clusterToken
+  fi
+fi
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -170,7 +198,7 @@ PASSWORD=$(kubectl get secret "$PASSWORD_SECRET" -n "$NAMESPACE" -o json \
 echo "==> [1/12] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
-echo "    All 3 pods Ready."
+echo "    All ${REPLICAS} pods Ready."
 
 # ── phase 2: liveness health probe ────────────────────────────────────────────
 
@@ -182,8 +210,14 @@ pf_stop "$PF_PID"
 
 # ── phase 3: raft formation ───────────────────────────────────────────────────
 
-echo "==> [3/12] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
-assert_quorum_n 3 || exit 1
+if (( REPLICAS == 1 )); then
+  # No Raft group: the only pod takes the writes the later phases send "to the leader".
+  echo "==> [3/12] Skipped: a single node forms no Raft group."
+  LEADER_ORDINAL=0
+else
+  echo "==> [3/12] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+  assert_quorum_n "$REPLICAS" || exit 1
+fi
 
 # ── phase 4: write ────────────────────────────────────────────────────────────
 
@@ -228,83 +262,88 @@ echo "    Got: '${RESULT}'"
 
 # ── phase 6: STATUS column ────────────────────────────────────────────────────
 
-echo "==> [6/12] Asserting STATUS=HEALTHY for all peers..."
-PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+if (( REPLICAS == 1 )); then
+  echo "==> [6/12] Skipped: a single node has no Raft peers."
+  echo "==> [7/12] Skipped: a single node has no leadership to transfer."
+else
+  echo "==> [6/12] Asserting STATUS=HEALTHY for all peers..."
+  PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+  pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
-cluster_status_assert_healthy "$HTTP_PORT" || exit 1
+  cluster_status_assert_healthy "$HTTP_PORT" || exit 1
 
-pf_stop "$PF_PID"
+  pf_stop "$PF_PID"
 
-# ── phase 7: leadership transfer ──────────────────────────────────────────────
+  # ── phase 7: leadership transfer ──────────────────────────────────────────────
 
-echo "==> [7/12] Transferring Raft leadership..."
-PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
+  echo "==> [7/12] Transferring Raft leadership..."
+  PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+  pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
-CURRENT_LEADER=${LEADERS[0]}
-TARGET_PEER=$(api "$HTTP_PORT" GET /api/v1/cluster \
-  | jq -r --arg leader "$CURRENT_LEADER" \
-    '.peers[] | select(.id != $leader) | .id' | head -n1)
-[[ -n "$TARGET_PEER" ]] || { echo "ERROR: no non-leader peer found"; exit 1; }
-echo "    Current leader: $CURRENT_LEADER"
-echo "    Transfer target: $TARGET_PEER"
+  CURRENT_LEADER=${LEADERS[0]}
+  TARGET_PEER=$(api "$HTTP_PORT" GET /api/v1/cluster \
+    | jq -r --arg leader "$CURRENT_LEADER" \
+      '.peers[] | select(.id != $leader) | .id' | head -n1)
+  [[ -n "$TARGET_PEER" ]] || { echo "ERROR: no non-leader peer found"; exit 1; }
+  echo "    Current leader: $CURRENT_LEADER"
+  echo "    Transfer target: $TARGET_PEER"
 
-api "$HTTP_PORT" POST /api/v1/cluster/leader \
-  "{\"peerId\":\"$TARGET_PEER\"}" >/dev/null
-pf_stop "$PF_PID"
+  api "$HTTP_PORT" POST /api/v1/cluster/leader \
+    "{\"peerId\":\"$TARGET_PEER\"}" >/dev/null
+  pf_stop "$PF_PID"
 
-# Wait up to 30s for the transfer to take effect on any pod we can reach.
-DEADLINE=$(( SECONDS + 30 ))
-NEW_LEADER=""
-while (( SECONDS < DEADLINE )); do
-  for i in 0 1 2; do
-    LOCAL=$(( HTTP_PORT + 20 + i ))
-    PID=$(pf_start "$i" "$LOCAL")
-    if pf_wait "$LOCAL" 5; then
-      L=$(api "$LOCAL" GET /api/v1/cluster | jq -r '.leaderId // empty' 2>/dev/null || echo "")
-      pf_stop "$PID"
-      if [[ "$L" == "$TARGET_PEER" ]]; then
-        NEW_LEADER="$L"
-        break 2
+  # Wait up to 30s for the transfer to take effect on any pod we can reach.
+  DEADLINE=$(( SECONDS + 30 ))
+  NEW_LEADER=""
+  while (( SECONDS < DEADLINE )); do
+    for (( i=0; i<REPLICAS; i++ )); do
+      LOCAL=$(( HTTP_PORT + 20 + i ))
+      PID=$(pf_start "$i" "$LOCAL")
+      if pf_wait "$LOCAL" 5; then
+        L=$(api "$LOCAL" GET /api/v1/cluster | jq -r '.leaderId // empty' 2>/dev/null || echo "")
+        pf_stop "$PID"
+        if [[ "$L" == "$TARGET_PEER" ]]; then
+          NEW_LEADER="$L"
+          break 2
+        fi
+      else
+        pf_stop "$PID"
       fi
-    else
-      pf_stop "$PID"
-    fi
+    done
+    sleep 2
   done
-  sleep 2
-done
 
-[[ "$NEW_LEADER" == "$TARGET_PEER" ]] || {
-  echo "ERROR: leadership did not transfer; got '${NEW_LEADER:-<none>}'"
-  exit 1
-}
-echo "    New leader: $NEW_LEADER"
+  [[ "$NEW_LEADER" == "$TARGET_PEER" ]] || {
+    echo "ERROR: leadership did not transfer; got '${NEW_LEADER:-<none>}'"
+    exit 1
+  }
+  echo "    New leader: $NEW_LEADER"
 
-# Verify writes via the new leader.
-NEW_LEADER_ORDINAL=$(echo "$NEW_LEADER" | sed -nE "s/^${RELEASE}-([0-9]+)\..*$/\1/p")
-PF_PID=$(pf_start "$NEW_LEADER_ORDINAL" "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to new leader failed"; exit 1; }
+  # Verify writes via the new leader.
+  NEW_LEADER_ORDINAL=$(echo "$NEW_LEADER" | sed -nE "s/^${RELEASE}-([0-9]+)\..*$/\1/p")
+  PF_PID=$(pf_start "$NEW_LEADER_ORDINAL" "$HTTP_PORT")
+  pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to new leader failed"; exit 1; }
 
-api "$HTTP_PORT" POST /api/v1/command/integration-test \
-  '{"language":"sql","command":"INSERT INTO TestDoc SET name = '\''post-transfer'\''"}' \
-  >/dev/null
+  api "$HTTP_PORT" POST /api/v1/command/integration-test \
+    '{"language":"sql","command":"INSERT INTO TestDoc SET name = '\''post-transfer'\''"}' \
+    >/dev/null
 
-POST_RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
-  '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''post-transfer'\''"}' \
-  | jq -r '.result[0].name // empty')
+  POST_RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
+    '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''post-transfer'\''"}' \
+    | jq -r '.result[0].name // empty')
 
-pf_stop "$PF_PID"
+  pf_stop "$PF_PID"
 
-[[ "$POST_RESULT" == "post-transfer" ]] || {
-  echo "ERROR: write via new leader failed (got '${POST_RESULT:-<empty>}')"
-  exit 1
-}
-echo "    Write via new leader succeeded."
+  [[ "$POST_RESULT" == "post-transfer" ]] || {
+    echo "ERROR: write via new leader failed (got '${POST_RESULT:-<empty>}')"
+    exit 1
+  }
+  echo "    Write via new leader succeeded."
 
-# Update tracked leader for downstream phases.
-LEADERS[0]=$NEW_LEADER
-LEADER_ORDINAL=$NEW_LEADER_ORDINAL
+  # Update tracked leader for downstream phases.
+  LEADERS[0]=$NEW_LEADER
+  LEADER_ORDINAL=$NEW_LEADER_ORDINAL
+fi
 
 # ── phase 8: console history under readOnlyRootFilesystem (issue #22) ─────────
 
@@ -413,20 +452,47 @@ if [[ "$ROOT_PASSWORD_FROM" == "env" ]]; then
   fi
   echo "    Root password passed as env var arcadedb.server.rootPassword from ${ENV_REF}; no file, not in the arguments."
 else
-  TOKEN=$(kubectl get secret arcadedb-credentials-secret \
-    -n "$NAMESPACE" \
-    -o jsonpath='{.data.clusterToken}' | base64 -d)
-  [[ -n "$TOKEN" ]] || { echo "ERROR: clusterToken key is empty or missing in arcadedb-credentials-secret"; exit 1; }
-
   grep -q -- '^-Darcadedb.server.rootPasswordPath=' <<<"$CMDLINE" || {
     echo "ERROR: the server is not started with -Darcadedb.server.rootPasswordPath"; exit 1; }
-  grep -q -- '^-Darcadedb.ha.clusterTokenPath=' <<<"$CMDLINE" || {
-    echo "ERROR: the server is not started with -Darcadedb.ha.clusterTokenPath"; exit 1; }
-  if grep -qF -- "$TOKEN" <<<"$CMDLINE"; then
-    echo "ERROR: the cluster token appears in the server's process arguments"
+  if kubectl get pod -n "$NAMESPACE" "${RELEASE}-0" -o json \
+       | jq -e '.spec.containers[0].env[]? | select(.name == "arcadedb.server.rootPassword")' >/dev/null; then
+    echo "ERROR: expected the password file, but the env var arcadedb.server.rootPassword is set too"
     exit 1
   fi
-  echo "    Root password and cluster token are read from files; neither is in the arguments."
+
+  if [[ -n "$EXPECT_TOKEN_SECRET" ]]; then
+    # jq rather than jsonpath: a user-supplied key may contain dots.
+    TOKEN=$(kubectl get secret "$EXPECT_TOKEN_SECRET" -n "$NAMESPACE" -o json \
+      | jq -r --arg k "$EXPECT_TOKEN_KEY" '.data[$k] // empty' | base64 -d)
+    [[ -n "$TOKEN" ]] || {
+      echo "ERROR: key ${EXPECT_TOKEN_KEY} of secret ${EXPECT_TOKEN_SECRET} is empty or missing"; exit 1; }
+
+    grep -q -- '^-Darcadedb.ha.clusterTokenPath=' <<<"$CMDLINE" || {
+      echo "ERROR: the server is not started with -Darcadedb.ha.clusterTokenPath"; exit 1; }
+    if grep -qF -- "$TOKEN" <<<"$CMDLINE"; then
+      echo "ERROR: the cluster token appears in the server's process arguments"
+      exit 1
+    fi
+    # The mounted token must be the expected Secret's, not the generated one.
+    TOKEN_REF=$(kubectl get pod -n "$NAMESPACE" "${RELEASE}-0" -o json \
+      | jq -r '[.spec.volumes[]?.projected.sources[]?.secret? // empty
+                | select(any(.items[]?; .path == "clusterToken"))
+                | "\(.name)/\(.items[] | select(.path == "clusterToken") | .key)"] | join(",")')
+    if [[ "$TOKEN_REF" != "${EXPECT_TOKEN_SECRET}/${EXPECT_TOKEN_KEY}" ]]; then
+      echo "ERROR: the clusterToken file should come from secret ${EXPECT_TOKEN_SECRET}/${EXPECT_TOKEN_KEY}, got '${TOKEN_REF:-<absent>}'"
+      exit 1
+    fi
+    echo "    Root password and cluster token (${TOKEN_REF}) are read from files; neither is in the arguments."
+  else
+    # Single node, or HA with a user-supplied root password Secret and no token on
+    # an image >= 26.11.1, which derives the token from the password file. Phase 12
+    # checks that the HA nodes derived matching tokens from it.
+    if grep -q -- '^-Darcadedb.ha.clusterTokenPath=' <<<"$CMDLINE"; then
+      echo "ERROR: no cluster token Secret is configured, but the server reads -Darcadedb.ha.clusterTokenPath"
+      exit 1
+    fi
+    echo "    Root password is read from a file and no cluster token file is mounted; nothing in the arguments."
+  fi
 fi
 
 # ── phase 10: logging configuration is loaded (issue #38) ────────────────────
@@ -518,30 +584,34 @@ fi
 # A follower forwards the write to the leader, authenticating with the cluster
 # token. In the env-var fallback every node derives that token from the root
 # password setting, so this is where a node that failed to read it would show.
-FOLLOWER_ORDINAL=""
-for i in 0 1 2; do
-  [[ "$i" == "$LEADER_ORDINAL" ]] || { FOLLOWER_ORDINAL=$i; break; }
-done
-echo "==> [12/12] Writing via follower pod-${FOLLOWER_ORDINAL}, reading back on leader pod-${LEADER_ORDINAL}..."
-PF_PID=$(pf_start "$FOLLOWER_ORDINAL" "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to follower pod-${FOLLOWER_ORDINAL} failed"; exit 1; }
-api "$HTTP_PORT" POST /api/v1/command/integration-test \
-  '{"language":"sql","command":"INSERT INTO TestDoc SET name = '\''via-follower'\''"}' \
-  >/dev/null || { echo "ERROR: write via follower pod-${FOLLOWER_ORDINAL} failed"; exit 1; }
-pf_stop "$PF_PID"
+if (( REPLICAS == 1 )); then
+  echo "==> [12/12] Skipped: a single node has no follower to forward through."
+else
+  FOLLOWER_ORDINAL=""
+  for (( i=0; i<REPLICAS; i++ )); do
+    [[ "$i" == "$LEADER_ORDINAL" ]] || { FOLLOWER_ORDINAL=$i; break; }
+  done
+  echo "==> [12/12] Writing via follower pod-${FOLLOWER_ORDINAL}, reading back on leader pod-${LEADER_ORDINAL}..."
+  PF_PID=$(pf_start "$FOLLOWER_ORDINAL" "$HTTP_PORT")
+  pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to follower pod-${FOLLOWER_ORDINAL} failed"; exit 1; }
+  api "$HTTP_PORT" POST /api/v1/command/integration-test \
+    '{"language":"sql","command":"INSERT INTO TestDoc SET name = '\''via-follower'\''"}' \
+    >/dev/null || { echo "ERROR: write via follower pod-${FOLLOWER_ORDINAL} failed"; exit 1; }
+  pf_stop "$PF_PID"
 
-PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
-pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
-FOLLOWER_RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
-  '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''via-follower'\''"}' \
-  | jq -r '.result[0].name // empty') || FOLLOWER_RESULT=""
-pf_stop "$PF_PID"
+  PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
+  pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
+  FOLLOWER_RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
+    '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''via-follower'\''"}' \
+    | jq -r '.result[0].name // empty') || FOLLOWER_RESULT=""
+  pf_stop "$PF_PID"
 
-[[ "$FOLLOWER_RESULT" == "via-follower" ]] || {
-  echo "ERROR: the write via follower pod-${FOLLOWER_ORDINAL} is not on the leader (got '${FOLLOWER_RESULT:-<empty>}')"
-  exit 1
-}
-echo "    Write via follower reached the leader."
+  [[ "$FOLLOWER_RESULT" == "via-follower" ]] || {
+    echo "ERROR: the write via follower pod-${FOLLOWER_ORDINAL} is not on the leader (got '${FOLLOWER_RESULT:-<empty>}')"
+    exit 1
+  }
+  echo "    Write via follower reached the leader."
+fi
 
 # Two more phases, helm-upgrade scale-up 3->5 and snapshot-install recovery (once
 # numbered 9 and 10, before phases 9 and 10 above took those numbers), were planned

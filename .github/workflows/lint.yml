@@ -70,3 +70,20 @@ jobs:
       imageTag: "26.10.2"
       rootPasswordSecret: arcadedb-root-password
       rootPasswordFrom: env
+
+  # HA with a user-supplied root password Secret and a separate cluster token
+  # Secret (issue #56): an explicit token makes the chart mount both as files on
+  # any image version, rootPasswordPath from one Secret and clusterTokenPath from
+  # the other.
+  integration-cluster-token:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      rootPasswordSecret: arcadedb-root-password
+      clusterTokenSecret: arcadedb-cluster-token
+
+  # A single node (issue #56): no HA, so the chart mounts the root password file
+  # only, with no cluster token. The suite skips its Raft phases.
+  integration-single-node:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      replicaCount: 1

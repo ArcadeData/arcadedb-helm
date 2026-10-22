@@ -102,6 +102,20 @@ means the upcoming ArcadeDB release breaks the chart. It shares its steps with
 the PR integration job via `.github/workflows/integration-reusable.yml`, so both
 exercise an identical suite differing only by image tag.
 
+The PR jobs in `.github/workflows/lint.yml` boot one cluster per route the chart
+can take to hand the root password and the HA cluster token to the server:
+
+| Job | Install | Route |
+|---|---|---|
+| `integration`, `integration-native` | HA, generated `arcadedb-credentials-secret` | password and token files |
+| `integration-cluster-token` | HA, user root password Secret + user cluster token Secret | password and token files, from two Secrets |
+| `integration-root-password-env` | HA, user root password Secret, no token, image 26.10.2 | `arcadedb.server.rootPassword` env var |
+| `integration-single-node` | `replicaCount=1` | password file only |
+
+The HA route with a user root password Secret, no token, and an image >= 26.11.1
+(password file only, token derived from it) runs in the latest-image guard as
+`integration-root-password-file-snapshot` until 26.11.1 is published.
+
 ### Release-bump checklist
 
 When a new ArcadeDB version is released:
@@ -118,7 +132,10 @@ When a new ArcadeDB version is released:
    (`latest` tracks the upcoming release). Once the pinned image is published,
    **remove that override** so the PR job tests the pinned `appVersion` again.
 4. The latest-image guard needs no change — it keeps watching the next cycle's
-   rolling image.
+   rolling image. The one exception is `integration-root-password-file-snapshot`
+   in `.github/workflows/latest-image.yml`, which names the `26.11.1-SNAPSHOT`
+   tag: once 26.11.1 is published, move it to `.github/workflows/lint.yml` with
+   `imageTag: "26.11.1"` and drop `pullPolicy: Always`.
 5. Leave the `integration-root-password-env` job in `.github/workflows/lint.yml`
    on its pinned pre-26.11.1 tag: it exists to boot the HA root-password
    env-var fallback, which the chart only takes on images older than 26.11.1.
