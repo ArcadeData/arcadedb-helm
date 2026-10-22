@@ -119,12 +119,138 @@ tests:
             - name: arcadedb-config
               mountPath: /config-seed
 
-  - it: is skipped on the native image, which has no shell
+  # Issue #49: the native image has no shell, so config-seed runs the JVM image
+  # of the same version instead. Without it the native server keeps its built-in
+  # groups (no "readonly"), because the config volume hides the image's config/.
+  - it: seeds the config volume on the native image from the JVM image of the same version
     set:
       image.flavor: native
     asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 1
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-seed
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: arcadedata/arcadedb:26.10.2
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: arcadedata/arcadedb:26.10.2-native
+      - equal:
+          path: spec.template.spec.initContainers[0].command[0]
+          value: sh
+      - equal:
+          path: spec.template.spec.initContainers[0].args
+          value:
+            - config-seed
+            - /home/arcadedb/config
+            - /config-seed
+            - server-groups.json
+            - gremlin-server.yaml
+            - gremlin-server.properties
+            - gremlin-server.groovy
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          value:
+            - name: arcadedb-config
+              mountPath: /config-seed
+
+  - it: on the native image, drops the -native suffix of an explicit image.tag
+    set:
+      image.flavor: native
+      image.tag: latest-native
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: arcadedata/arcadedb:latest
+
+  - it: on the native image, keeps image.registry, repository and pullPolicy
+    set:
+      image.flavor: native
+      image.registry: registry.example.com
+      image.repository: mirror/arcadedb
+      image.tag: 26.11.1-native
+      image.pullPolicy: Always
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.example.com/mirror/arcadedb:26.11.1
+      - equal:
+          path: spec.template.spec.initContainers[0].imagePullPolicy
+          value: Always
+
+  - it: on the native image, runs with the container securityContext (both images run as 1000:1000)
+    set:
+      image.flavor: native
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext
+          value:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+  - it: on the native image, fails when the JVM tag cannot be derived from image.tag
+    set:
+      image.flavor: native
+      image.tag: my-build
+    asserts:
+      - failedTemplate:
+          errorMessage: "config-seed needs a JVM image with a shell, and image.tag 'my-build' does not end in -native, so its JVM tag cannot be derived. Set initContainers.configSeed.image.tag (or .registry / .repository) to the JVM image of the same ArcadeDB version, or set initContainers.configSeed.enabled=false."
+
+  - it: on the native image, an explicit initContainers.configSeed.image.tag replaces the derived one
+    set:
+      image.flavor: native
+      image.tag: my-build
+      initContainers.configSeed.image.tag: my-build-jvm
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: arcadedata/arcadedb:my-build-jvm
+
+  - it: initContainers.configSeed.image overrides registry, repository and tag on either flavor
+    set:
+      initContainers.configSeed.image.registry: registry.example.com
+      initContainers.configSeed.image.repository: mirror/arcadedb-jvm
+      initContainers.configSeed.image.tag: 26.10.2-custom
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.example.com/mirror/arcadedb-jvm:26.10.2-custom
+
+  - it: on the native image, is skipped when initContainers.configSeed.enabled is false
+    set:
+      image.flavor: native
+      initContainers.configSeed.enabled: false
+    asserts:
       - notExists:
           path: spec.template.spec.initContainers
+
+  - it: on the native image, stays on when the configSeed key is missing (helm upgrade --reuse-values)
+    set:
+      image.flavor: native
+      initContainers.configSeed: null
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: arcadedata/arcadedb:26.10.2
+
+  - it: on the native image, seeds a relocated config directory below a parent mount
+    set:
+      image.flavor: native
+      arcadedb.configDirectory: /var/lib/arcadedb/config
+      volumeMounts:
+        - name: arcadedb-state
+          mountPath: /var/lib/arcadedb
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].args[2]
+          value: /config-seed/config
 
   - it: is skipped when initContainers.configSeed.enabled is false
     set:

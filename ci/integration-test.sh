@@ -409,18 +409,46 @@ else
   echo "    Server log written to the configured logs directory."
 fi
 
-# ── phase 11: default config files are seeded (issue #39) ───────────────────
+# ── phase 11: default config files are seeded (issues #39, #49) ─────────────
 
 POD="${RELEASE}-0"
 INIT_NAMES=$(kubectl get pod -n "$NAMESPACE" "$POD" \
   -o jsonpath='{.spec.initContainers[*].name}')
 if [[ "$IMAGE_FLAVOR" == "native" ]]; then
-  echo "==> [11/11] Asserting config-seed is skipped on the native image..."
-  if [[ " $INIT_NAMES " == *" config-seed "* ]]; then
-    echo "ERROR: config-seed rendered on the native image, which has no shell"
+  echo "==> [11/11] Asserting server-groups.json was seeded on the native image..."
+  # The native image has no shell, so config-seed runs the JVM image of the same
+  # version (#49), and the file cannot be read with kubectl exec. Check that the
+  # init container ran the JVM image, that it left server-groups.json on the
+  # volume, and that the server loaded the readonly group from it.
+  if [[ " $INIT_NAMES " != *" config-seed "* ]]; then
+    echo "ERROR: no config-seed init container on the native image; init containers: ${INIT_NAMES:-<none>}"
     exit 1
   fi
-  echo "    No config-seed init container on the native image."
+  SEED_IMAGE=$(kubectl get pod -n "$NAMESPACE" "$POD" \
+    -o jsonpath='{.spec.initContainers[?(@.name=="config-seed")].image}')
+  if [[ "$SEED_IMAGE" == *-native ]]; then
+    echo "ERROR: config-seed runs the native image ${SEED_IMAGE}, which has no shell"
+    exit 1
+  fi
+  echo "    config-seed ran ${SEED_IMAGE}."
+  SEED_LOGS=$(kubectl logs -n "$NAMESPACE" "$POD" -c config-seed)
+  if ! grep -qE 'config-seed: (seeded|keeping existing) server-groups.json' <<<"$SEED_LOGS"; then
+    echo "ERROR: config-seed did not leave server-groups.json on the config volume:"
+    echo "$SEED_LOGS"
+    exit 1
+  fi
+  PF_PID=$(pf_start 0 "$HTTP_PORT")
+  pf_wait "$HTTP_PORT" 20 || { echo "ERROR: port-forward to ${POD} never became ready"; exit 1; }
+  GROUPS_JSON=$(api "$HTTP_PORT" GET /api/v1/server/groups) || {
+    echo "ERROR: GET /api/v1/server/groups failed"; exit 1;
+  }
+  pf_stop "$PF_PID"
+  if [[ "$(jq -r '.result.databases["*"].groups | has("readonly")' <<<"$GROUPS_JSON")" != "true" ]]; then
+    echo "ERROR: the server has no readonly group; it did not load the seeded server-groups.json:"
+    echo "$GROUPS_JSON" | jq '.result' || echo "$GROUPS_JSON"
+    exit 1
+  fi
+  echo "    The server loaded the readonly group from the seeded server-groups.json."
 else
   echo "==> [11/11] Asserting the image's server-groups.json was seeded..."
   # The arcadedb-config volume hides the image's config/. Without the seed the
