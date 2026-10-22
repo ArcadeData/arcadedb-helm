@@ -555,8 +555,14 @@ TLS can be enabled for those protocols that support it by setting `tls.enabled` 
 A key Store and trust Store are required from a secret. The keystore must be in `PKCS12` format.
 The trust store defaults to `JKS` in line with Java defaults but `PKCS12` is supported - set `tls.secretRef.trustStore.format`.
 
-The store password is read from a Secret and injected through the `TLS_STORE_PASSWORD` environment variable, so it never
-appears in the pod spec. It defaults to the root password Secret; set `tls.secretRef.passwordSecret` to use another one.
+The store password is read from a Secret through a `secretKeyRef`, so it never appears in the pod spec. It is exported as
+two environment variables named after the server settings, `arcadedb.ssl.keyStorePassword` and
+`arcadedb.ssl.trustStorePassword`, which the server reads when no system property of that name is set. It is not passed as
+a `-D` argument: Kubernetes expands `$(VAR)` references into the argument itself, which would make the password readable
+through `/proc/<pid>/cmdline` by anything in the pod.
+
+The store password defaults to the root password Secret. Prefer a dedicated one, set through `tls.secretRef.passwordSecret`,
+so that the root password is not shared with the key store and trust store.
 
 The chart supports using `cert-manager` to create a certificate with the correct stores. Set the `tls.certManager` values
 (`issuerRef.name` is required). The certificate covers the headless, `-http` and (when enabled) `-external` services plus

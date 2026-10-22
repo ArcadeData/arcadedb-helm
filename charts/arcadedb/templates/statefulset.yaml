@@ -223,11 +223,7 @@ spec:
               value: {{ printf "%s/.cache" . | quote }}
             {{- end }}
             {{- if .Values.tls.enabled }}
-            - name: TLS_STORE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "arcadedb.tls.passwordSecretName" . }}
-                  key: {{ include "arcadedb.tls.passwordSecretKey" . }}
+            {{- include "arcadedb.tls.passwordEnv" . | nindent 12 }}
             {{- end }}
             {{- if not $native }}
             {{- with .Values.arcadedb.consoleWorkingDirectory }}
