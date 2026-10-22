@@ -85,10 +85,44 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 
 ### arcadedb.credentials
 
-| Name                                            | Description                   | Value |
-|-------------------------------------------------|-------------------------------|-------|
-| `arcadedb.credentials.rootPassword.secret.name` | Name of existing secret       | `nil` |
-| `arcadedb.credentials.rootPassword.secret.key`  | Key to use in existing secret | `nil` |
+| Name                                            | Description                                                                                                                       | Value                    |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|--------------------------|
+| `arcadedb.credentials.rootPassword.secret.name` | Name of existing secret                                                                                                           | `nil`                    |
+| `arcadedb.credentials.rootPassword.secret.key`  | Key to use in existing secret                                                                                                     | `nil`                    |
+| `arcadedb.credentials.clusterToken.secret.name` | Existing secret holding the HA cluster token. `nil` uses the generated `clusterToken` key, or none with a user-supplied root password secret | `nil`                    |
+| `arcadedb.credentials.clusterToken.secret.key`  | Key to use in the cluster token secret                                                                                            | `clusterToken`           |
+| `arcadedb.credentials.mountPath`                | Directory the root password and cluster token are mounted at as files                                                            | `/etc/arcadedb/secrets`  |
+
+#### Root password and HA cluster token
+
+The root password is mounted from its Secret as a file and passed with `-Darcadedb.server.rootPasswordPath`, so it does
+not appear in the process arguments (`/proc/<pid>/cmdline`, readable by anything in the pod). The `rootPassword`
+environment variable is still set, for `extraCommands` that reference `$(rootPassword)`.
+
+With HA active (`replicaCount > 1` or autoscaling), the nodes authenticate each other with a shared cluster token. Without
+an explicit one, every node derives it from the root password and the cluster name with a fixed public salt, so a weak
+root password makes it guessable and it cannot be rotated on its own. The chart mounts a dedicated token and passes
+`-Darcadedb.ha.clusterTokenPath`:
+
+- **Generated root password (default):** a random 64-character `clusterToken` key is added to
+  `arcadedb-credentials-secret`, and kept across `helm upgrade` like the root password. Like the root password, it is
+  regenerated on every render by `helm template` (e.g. ArgoCD); supply your own Secrets for GitOps workflows.
+- **User-supplied root password Secret:** the token is opt-in, so an existing Secret without the key does not leave the
+  pods stuck in `ContainerCreating`. Create one and point `arcadedb.credentials.clusterToken.secret` at it:
+
+  ```shell
+  kubectl create secret generic arcadedb-cluster-token --from-literal=clusterToken="$(openssl rand -hex 32)"
+  helm upgrade ... --set arcadedb.credentials.clusterToken.secret.name=arcadedb-cluster-token
+  ```
+
+  Until then, on an image older than 26.11.1 the root password stays on the command line in HA mode: those servers
+  derive the token from `arcadedb.server.rootPassword` only. From 26.11.1 the server derives it from the password file
+  too, and the chart switches to the file whatever the token setting.
+
+Upgrading an HA release from a chart version that did not mount a token changes the token. During the rolling restart
+the restarted pods hold the new token and the others the old one, so commands forwarded between the two groups can be
+rejected until the rollout completes. Rotating the token later (changing the Secret and restarting the StatefulSet)
+behaves the same way.
 
 ### image
 

@@ -60,6 +60,26 @@ arcadedb:
         name: null
         ## @param arcadedb.credentials.rootPassword.secret.key Key inside the existing secret
         key: null
+    ## Shared secret the HA nodes authenticate each other with (forwarded commands, Raft
+    ## group changes). Without it every node derives the token from the root password and
+    ## the cluster name with a fixed public salt, so a weak root password makes it guessable
+    ## and it cannot be rotated on its own. With the auto-generated root password secret a
+    ## random 64-char `clusterToken` key is added to 'arcadedb-credentials-secret' and kept
+    ## across upgrades. With a user-supplied root password secret this is opt-in: set
+    ## secret.name (and key) to a Secret holding the token, e.g.
+    ##   kubectl create secret generic arcadedb-cluster-token \
+    ##     --from-literal=clusterToken="$(openssl rand -hex 32)"
+    ## Only mounted when HA is active (replicaCount > 1 or autoscaling enabled).
+    clusterToken:
+      secret:
+        ## @param arcadedb.credentials.clusterToken.secret.name Existing secret holding the HA cluster token (null = the generated key in 'arcadedb-credentials-secret', or none when rootPassword.secret.name is set)
+        name: null
+        ## @param arcadedb.credentials.clusterToken.secret.key Key inside the existing secret (null = clusterToken)
+        key: null
+    ## @param arcadedb.credentials.mountPath Directory the root password and cluster token
+    ## are mounted at as files. The server reads them through arcadedb.server.rootPasswordPath
+    ## and arcadedb.ha.clusterTokenPath, so neither appears in the process arguments.
+    mountPath: /etc/arcadedb/secrets
 
   ## @section arcadedb.plugins
   ## Uncomment and configure to enable wire-protocol plugins.

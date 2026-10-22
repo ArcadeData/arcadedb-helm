@@ -1,6 +1,10 @@
 {{- include "arcadedb.observability.validate" . -}}
 {{- include "arcadedb.configDirectory.validate" . -}}
 {{- $native := include "arcadedb.native" . -}}
+{{- $passwordFromFile := include "arcadedb.credentials.rootPasswordFromFile" . -}}
+{{- $mountClusterToken := include "arcadedb.credentials.mountClusterToken" . -}}
+{{- /* defaulted: helm upgrade --reuse-values from an older release lacks the key */ -}}
+{{- $credentialsDir := trimSuffix "/" (.Values.arcadedb.credentials.mountPath | default "/etc/arcadedb/secrets") -}}
 {{- $storage := include "arcadedb.persistence.plan" . | fromJson -}}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -101,7 +105,16 @@ spec:
             - -Darcadedb.dumpConfigAtStartup=true
             - -Darcadedb.server.name=$(HOSTNAME)
             - -Darcadedb.server.httpIncomingPort={{ .Values.service.http.port }}
+            {{- if $passwordFromFile }}
+            - -Darcadedb.server.rootPasswordPath={{ $credentialsDir }}/rootPassword
+            {{- else }}
+            {{- /*
+              HA on a pre-26.11.1 image with no explicit cluster token: the server
+              derives the token from the inline root password only, so the password
+              stays on the command line. Set arcadedb.credentials.clusterToken to drop it.
+            */}}
             - -Darcadedb.server.rootPassword=$(rootPassword)
+            {{- end }}
             - -Darcadedb.server.configDirectory={{ .Values.arcadedb.configDirectory }}
             - -Darcadedb.server.databaseDirectory={{ .Values.arcadedb.databaseDirectory }}
             - -Darcadedb.server.defaultDatabases={{ .Values.arcadedb.defaultDatabases }}
@@ -112,6 +125,9 @@ spec:
             - -Darcadedb.ha.serverList={{ include "arcadedb.nodenames" . }}
             - -Darcadedb.ha.raftPort={{ .Values.service.rpc.port }}
             - -Darcadedb.ha.raftStorageDirectory={{ .Values.arcadedb.ha.raftStorageDirectory }}
+            {{- if $mountClusterToken }}
+            - -Darcadedb.ha.clusterTokenPath={{ $credentialsDir }}/clusterToken
+            {{- end }}
             {{- end }}
             {{- with .Values.arcadedb.extraCommands }}
             {{- toYaml . | nindent 12 }}
@@ -147,6 +163,11 @@ spec:
             {{- if .Values.tls.enabled }}
             - name: tls-certs
               mountPath: {{ .Values.tls.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if $passwordFromFile }}
+            - name: arcadedb-credentials
+              mountPath: {{ $credentialsDir }}
               readOnly: true
             {{- end }}
             {{- with .Values.volumeMounts }}
@@ -217,6 +238,26 @@ spec:
         - name: tls-certs
           secret:
             secretName: {{ include "arcadedb.tls.secretName" . }}
+        {{- end }}
+        {{- if $passwordFromFile }}
+        {{- $rootPasswordSecret := include "arcadedb.credentials.rootPasswordSecret" . | fromYaml }}
+        - name: arcadedb-credentials
+          projected:
+            defaultMode: {{ include "arcadedb.credentials.fileMode" . }}
+            sources:
+              - secret:
+                  name: {{ $rootPasswordSecret.name }}
+                  items:
+                    - key: {{ $rootPasswordSecret.key }}
+                      path: rootPassword
+              {{- if $mountClusterToken }}
+              {{- $clusterTokenSecret := include "arcadedb.credentials.clusterTokenSecret" . | fromYaml }}
+              - secret:
+                  name: {{ $clusterTokenSecret.name }}
+                  items:
+                    - key: {{ $clusterTokenSecret.key }}
+                      path: clusterToken
+              {{- end }}
         {{- end }}
         {{- with $storage.volumes }}
           {{- toYaml . | nindent 8 }}

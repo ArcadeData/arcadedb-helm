@@ -705,7 +705,8 @@ tests:
       - contains:
           path: spec.template.spec.volumes
           content: { name: arcadedb-raft, emptyDir: {} }
-      - lengthEqual: { path: spec.template.spec.volumes, count: 3 }
+      # logs, tmp, raft, plus the chart's arcadedb-credentials projected volume
+      - lengthEqual: { path: spec.template.spec.volumes, count: 4 }
 
   - it: a non-emptyDir volume for a reserved name is kept and no PVC is generated for it
     set:
@@ -1324,3 +1325,321 @@ tests:
       - notContains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.postgres.ssl=DISABLED"
+
+  # --- issue #35: root password and HA cluster token mounted as files -------
+
+  - it: single node reads the root password from the mounted Secret, never from the command line
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPassword=$(rootPassword)
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-credentials
+            mountPath: /etc/arcadedb/secrets
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-credentials
+            projected:
+              defaultMode: 288
+              sources:
+                - secret:
+                    name: arcadedb-credentials-secret
+                    items:
+                      - key: rootPassword
+                        path: rootPassword
+
+  - it: single node with a user-supplied root password Secret mounts that Secret's key
+    set:
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPassword=$(rootPassword)
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-credentials
+            projected:
+              defaultMode: 288
+              sources:
+                - secret:
+                    name: my-secret
+                    items:
+                      - key: my-key
+                        path: rootPassword
+
+  - it: native image also reads the root password from the mounted Secret
+    set:
+      image.flavor: native
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPassword=$(rootPassword)
+
+  - it: HA with the chart-generated Secret mounts a dedicated cluster token and the root password
+    set:
+      replicaCount: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPassword=$(rootPassword)
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-credentials
+            projected:
+              defaultMode: 288
+              sources:
+                - secret:
+                    name: arcadedb-credentials-secret
+                    items:
+                      - key: rootPassword
+                        path: rootPassword
+                - secret:
+                    name: arcadedb-credentials-secret
+                    items:
+                      - key: clusterToken
+                        path: clusterToken
+
+  - it: autoscaling (HA) also mounts the dedicated cluster token
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 3
+      autoscaling.maxReplicas: 5
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+
+  - it: HA with a user-supplied root password Secret and no token keeps the derived token and the inline password on pre-26.11.1 images
+    set:
+      replicaCount: 3
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPassword=$(rootPassword)
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken
+      - notContains:
+          path: spec.template.spec.volumes
+          any: true
+          content:
+            name: arcadedb-credentials
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          any: true
+          content:
+            name: arcadedb-credentials
+
+  - it: HA with user-supplied root password and cluster token Secrets mounts both
+    set:
+      replicaCount: 3
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+      arcadedb.credentials.clusterToken.secret.name: my-token-secret
+      arcadedb.credentials.clusterToken.secret.key: token
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPassword=$(rootPassword)
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-credentials
+            projected:
+              defaultMode: 288
+              sources:
+                - secret:
+                    name: my-secret
+                    items:
+                      - key: my-key
+                        path: rootPassword
+                - secret:
+                    name: my-token-secret
+                    items:
+                      - key: token
+                        path: clusterToken
+
+  - it: clusterToken.secret.key defaults to clusterToken
+    set:
+      replicaCount: 3
+      arcadedb.credentials.clusterToken.secret.name: my-token-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-credentials
+            projected:
+              defaultMode: 288
+              sources:
+                - secret:
+                    name: arcadedb-credentials-secret
+                    items:
+                      - key: rootPassword
+                        path: rootPassword
+                - secret:
+                    name: my-token-secret
+                    items:
+                      - key: clusterToken
+                        path: clusterToken
+
+  - it: a user-supplied cluster token Secret is not mounted without HA
+    set:
+      arcadedb.credentials.clusterToken.secret.name: my-token-secret
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-credentials
+            projected:
+              defaultMode: 288
+              sources:
+                - secret:
+                    name: arcadedb-credentials-secret
+                    items:
+                      - key: rootPassword
+                        path: rootPassword
+
+  - it: from 26.11.1 the root password file is used in HA without an explicit token (the server derives the token from it)
+    set:
+      replicaCount: 3
+      image.tag: "26.11.1"
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPassword=$(rootPassword)
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken
+
+  - it: the image version gate reads a -native suffixed tag
+    set:
+      replicaCount: 3
+      image.flavor: native
+      image.tag: "26.12.1-native"
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+
+  - it: a non-version tag falls back to the inline root password when HA has no explicit token
+    set:
+      replicaCount: 3
+      image.tag: latest
+      arcadedb.credentials.rootPassword.secret.name: my-secret
+      arcadedb.credentials.rootPassword.secret.key: my-key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPassword=$(rootPassword)
+
+  - it: arcadedb.credentials.mountPath is configurable and the -D paths follow it
+    set:
+      replicaCount: 3
+      arcadedb.credentials.mountPath: /var/run/arcadedb
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/var/run/arcadedb/rootPassword
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/var/run/arcadedb/clusterToken
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: arcadedb-credentials
+            mountPath: /var/run/arcadedb
+            readOnly: true
+
+  - it: mounted secret files are world-readable (0444) when the pod has no fsGroup to grant group access
+    set:
+      podSecurityContext:
+        fsGroup: null
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "arcadedb-credentials")].projected.defaultMode
+          value: 292
+
+  - it: the mounted secret volume survives a user override of the volumes list
+    set:
+      volumes:
+        - name: arcadedb-data
+          emptyDir: {}
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "arcadedb-credentials")].projected.sources[0].secret.name
+          value: arcadedb-credentials-secret
+
+  - it: the rootPassword env var stays available in HA for extraCommands that reference $(rootPassword)
+    set:
+      replicaCount: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: rootPassword
+            valueFrom:
+              secretKeyRef:
+                name: arcadedb-credentials-secret
+                key: rootPassword
+
+  - it: an upgrade with --reuse-values from a release without the new credential keys still renders
+    set:
+      replicaCount: 3
+      arcadedb.credentials.mountPath: null
+      arcadedb.credentials.clusterToken: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.server.rootPasswordPath=/etc/arcadedb/secrets/rootPassword
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: -Darcadedb.ha.clusterTokenPath=/etc/arcadedb/secrets/clusterToken

@@ -477,6 +477,88 @@ Returns YAML (possibly empty).
 {{- end -}}
 
 {{/*
+Returns "true" when Raft HA is active (replicaCount > 1 or autoscaling), "".
+Same condition the StatefulSet uses to emit the -Darcadedb.ha.* arguments.
+*/}}
+{{- define "arcadedb.ha.enabled" -}}
+{{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Secret and key holding the root password: the user-supplied one, else the
+chart-generated arcadedb-credentials-secret. Returns YAML {name, key}.
+*/}}
+{{- define "arcadedb.credentials.rootPasswordSecret" -}}
+{{- $s := .Values.arcadedb.credentials.rootPassword.secret -}}
+{{- if $s.name }}
+name: {{ $s.name }}
+key: {{ $s.key }}
+{{- else }}
+name: arcadedb-credentials-secret
+key: rootPassword
+{{- end }}
+{{- end -}}
+
+{{/*
+Secret and key holding the dedicated HA cluster token. Returns YAML {name, key},
+or nothing when there is none: a user-supplied root password Secret makes the
+token opt-in, since that Secret may not carry a clusterToken key and a missing
+key would leave the pods stuck in ContainerCreating after an upgrade.
+*/}}
+{{- define "arcadedb.credentials.clusterTokenSecret" -}}
+{{- $c := .Values.arcadedb.credentials -}}
+{{- $t := ($c.clusterToken | default dict).secret | default dict -}}
+{{- if $t.name }}
+name: {{ $t.name }}
+key: {{ $t.key | default "clusterToken" }}
+{{- else if not $c.rootPassword.secret.name }}
+name: arcadedb-credentials-secret
+key: clusterToken
+{{- end }}
+{{- end -}}
+
+{{/*
+Returns "true" when the cluster token file is mounted and passed with
+-Darcadedb.ha.clusterTokenPath: HA is active and a token Secret is known.
+*/}}
+{{- define "arcadedb.credentials.mountClusterToken" -}}
+{{- if and (include "arcadedb.ha.enabled" .) (include "arcadedb.credentials.clusterTokenSecret" . | trim) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Returns "true" when the image tag is a release at or after 26.11.1, the first
+server that derives the HA cluster token from arcadedb.server.rootPasswordPath
+(ArcadeData/arcadedb#10479). A tag without a leading x.y.z (latest, a digest
+alias) is treated as older.
+*/}}
+{{- define "arcadedb.image.derivesTokenFromPasswordFile" -}}
+{{- $version := regexFind "^[0-9]+\\.[0-9]+\\.[0-9]+" (include "arcadedb.image.tag" .) -}}
+{{- if and $version (semverCompare ">=26.11.1" $version) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Returns "true" when the root password is passed as a mounted file
+(-Darcadedb.server.rootPasswordPath) instead of on the command line, where it
+is readable through /proc/<pid>/cmdline. Before 26.11.1 an HA node derives its
+cluster token from the inline arcadedb.server.rootPassword only, so in HA the
+file is used only when an explicit token is mounted or the image derives the
+token from the file.
+*/}}
+{{- define "arcadedb.credentials.rootPasswordFromFile" -}}
+{{- if or (not (include "arcadedb.ha.enabled" .)) (include "arcadedb.credentials.mountClusterToken" .) (include "arcadedb.image.derivesTokenFromPasswordFile" .) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Group-readable (0440) when the pod has an fsGroup, which owns the projected
+files and is a supplementary group of every container process; world-readable
+(0444) otherwise, since a secret volume is owned by root and the server runs
+unprivileged. Decimal, because YAML 1.2 parsers read 0440 as a decimal number.
+*/}}
+{{- define "arcadedb.credentials.fileMode" -}}
+{{- if (.Values.podSecurityContext | default dict).fsGroup -}}288{{- else -}}292{{- end -}}
+{{- end -}}
+
+{{/*
 Storage plan for the reserved arcadedb-data / arcadedb-config / arcadedb-raft
 volumes (#34), returned as JSON:
   claims    - volumeClaimTemplates the chart generates from persistence.*
