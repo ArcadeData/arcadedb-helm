@@ -143,6 +143,8 @@ arcadedb:
     #   port: 7687
     # gremlin:
     #   enabled: true
+    #   # Must be 8182 (any other value fails the render): the Gremlin plugin reads
+    #   # its port from gremlin-server.yaml, not from a -D setting the chart can pass (#47).
     #   port: 8182
     # postgres:
     #   enabled: true
