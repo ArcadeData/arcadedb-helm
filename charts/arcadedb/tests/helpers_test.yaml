@@ -66,7 +66,7 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.ha.serverList=test-arcadedb-0.test-arcadedb.default.svc.cluster.local:2434:2480:0:2490,test-arcadedb-1.test-arcadedb.default.svc.cluster.local:2434:2480:0:2490"
 
-  - it: arcadedb.plugin.parameters emits gremlin plugin entry and port
+  - it: arcadedb.plugin.parameters emits the gremlin plugin entry and no port flag (#47)
     set:
       arcadedb.plugins.gremlin.enabled: true
       arcadedb.plugins.gremlin.port: 8182
@@ -74,7 +74,7 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.plugins=GremlinServer:com.arcadedb.server.gremlin.GremlinServerPlugin"
-      - contains:
+      - notContains:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.gremlin.port=8182"
 

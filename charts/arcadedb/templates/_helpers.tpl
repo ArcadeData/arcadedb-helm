@@ -159,6 +159,17 @@ parameters, service and networkPolicy helpers build on this output.
         {{- $port = default 7687 $config.port }}
       {{- else if eq $plugin "gremlin" }}
         {{- $port = default 8182 $config.port }}
+        {{/*
+        The Gremlin plugin reads its port from gremlin-server.yaml (the image's sets
+        none, so TinkerPop's default 8182) and from gremlin.* context keys; no -D
+        system property reaches either, and
+        server-configuration.json drops keys that are not GlobalConfiguration settings.
+        Any other value would point the Service and NetworkPolicy at a port nothing
+        listens on, so refuse it (#47).
+        */}}
+        {{- if ne (int $port) 8182 }}
+          {{- fail (printf "arcadedb.plugins.gremlin.port is %v, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182." $port) -}}
+        {{- end }}
       {{- else if eq $plugin "postgres" }}
         {{- $port = default 5432 $config.port }}
       {{- else if eq $plugin "mongo" }}
@@ -205,7 +216,7 @@ Create a comma separated list of plugins to be enabled in arcadedb
       {{- $params = append $params (printf "-Darcadedb.bolt.port=%d" (int $config.port)) -}}
     {{- else if eq $plugin "gremlin" -}}
       {{- $plugins = append $plugins "GremlinServer:com.arcadedb.server.gremlin.GremlinServerPlugin" -}}
-      {{- $params = append $params (printf "-Darcadedb.gremlin.port=%d" (int $config.port)) -}}
+      {{- /* No port flag: the plugin takes its port from gremlin-server.yaml (#47). */ -}}
     {{- else if eq $plugin "postgres" -}}
       {{- $plugins = append $plugins "Postgres:com.arcadedb.postgres.PostgresProtocolPlugin" -}}
       {{- $params = append $params (printf "-Darcadedb.postgres.port=%d" (int $config.port)) -}}

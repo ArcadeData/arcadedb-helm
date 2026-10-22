@@ -1,0 +1,101 @@
+suite: Gremlin port (#47)
+templates:
+  - statefulset.yaml
+  - service.yaml
+  - networkpolicy.yaml
+release:
+  name: test
+  namespace: default
+# The Gremlin plugin takes its port from gremlin-server.yaml (the image's sets
+# none, so TinkerPop's default 8182) and from gremlin.* context keys, never from
+# a -D system property. The chart
+# used to render -Darcadedb.gremlin.port, which the server ignored, while the
+# Service and NetworkPolicy followed arcadedb.plugins.gremlin.port: any other
+# value pointed them at a port nothing listened on.
+tests:
+  - it: does not render -Darcadedb.gremlin.port, which the server never reads
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.plugins=GremlinServer:com.arcadedb.server.gremlin.GremlinServerPlugin"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.gremlin.port=8182"
+
+  - it: an explicit port of 8182 still renders
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 8182
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.gremlin.port=8182"
+
+  - it: the Service exposes 8182 when the port is left unset
+    template: service.yaml
+    documentIndex: 1
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+    asserts:
+      - contains:
+          path: spec.ports
+          content: { port: 8182, targetPort: 8182, protocol: TCP, name: gremlin-port }
+
+  - it: the NetworkPolicy opens 8182 when the port is left unset
+    template: networkpolicy.yaml
+    documentIndex: 0
+    set:
+      networkPolicy.enabled: true
+      arcadedb.plugins.gremlin.enabled: true
+    asserts:
+      - contains:
+          path: spec.ingress[0].ports
+          content: { port: 8182, protocol: TCP }
+
+  # The check lives in _arcadedb.plugin.ports, which the StatefulSet, the
+  # Services and the NetworkPolicy all read. Helm renders every template of a
+  # release and the StatefulSet is always one of them, so the failure surfaces
+  # there (helm template -s service.yaml reports it at statefulset.yaml too):
+  # no install or upgrade gets a Service or NetworkPolicy on the wrong port.
+  - it: refuses a port other than 8182
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182."
+
+  - it: refuses a port other than 8182 with the NetworkPolicy and external Service enabled
+    template: statefulset.yaml
+    set:
+      networkPolicy.enabled: true
+      service.external.enabled: true
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: 9999
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182."
+
+  - it: a port given as a string is compared by value
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: true
+      arcadedb.plugins.gremlin.port: "7777"
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.plugins.gremlin.port is 7777, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182."
+
+  - it: a disabled gremlin entry with another port renders
+    template: statefulset.yaml
+    set:
+      arcadedb.plugins.gremlin.enabled: false
+      arcadedb.plugins.gremlin.port: 9999
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.server.plugins=GremlinServer:com.arcadedb.server.gremlin.GremlinServerPlugin"

@@ -100,7 +100,7 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `arcadedb.plugins.bolt.enabled`           | Enable Bolt protocol support                            | not set               |
 | `arcadedb.plugins.bolt.port`              | Bolt protocol port                                      | `7687` when enabled   |
 | `arcadedb.plugins.gremlin.enabled`        | Enable Gremlin protocol support                         | not set               |
-| `arcadedb.plugins.gremlin.port`           | Gremlin protocol port                                   | `8182` when enabled  |
+| `arcadedb.plugins.gremlin.port`           | Gremlin protocol port; only `8182` is accepted (see below) | `8182` when enabled  |
 | `arcadedb.plugins.postgres.enabled`       | Enable PostgreSQL protocol support                      | not set               |
 | `arcadedb.plugins.postgres.port`          | PostgreSQL protocol port                                | `5432` when enabled  |
 | `arcadedb.plugins.mongo.enabled`          | Enable MongoDB protocol support                         | not set               |
@@ -112,6 +112,11 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `arcadedb.plugins.<custom>.enabled`       | Enable a custom plugin                                  | not set               |
 | `arcadedb.plugins.<custom>.port`          | Custom plugin port, or `false` for a portless plugin   | required unless portless |
 | `arcadedb.plugins.<custom>.class`         | Custom plugin implementation class                     | required              |
+
+The Gremlin plugin takes its port from `gremlin-server.yaml` (the image's sets none, so TinkerPop's default
+`8182`), not from a `-D` setting, so the chart cannot move it. `arcadedb.plugins.gremlin.port` only sets the port
+the Services and the NetworkPolicy expose, and any value other than `8182` fails the render instead of pointing
+them at a port nothing listens on.
 
 ### arcadedb.credentials
 
