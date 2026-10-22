@@ -717,25 +717,47 @@ that is the directory or one of its parents. Returns JSON {} when none does.
 {{- end -}}
 
 {{/*
-The config-seed init container. It runs the server image itself (same registry,
-repository and tag, so the defaults match the server version) with the volume
-that holds configDirectory mounted at /config-seed instead of over the image's
-config/, and copies each file the directory does not hold yet. Existing files,
-including ones the server or an operator changed, are never overwritten.
-Skipped on the native image (no shell), when disabled, and when no volumeMounts
-entry holds configDirectory (nothing would outlive the init container).
+Image the config-seed init container runs: the server image (same registry,
+repository and tag, so the defaults match the server version), except on the
+native flavor (#49), which has no shell: there it is the JVM image of the same
+version, the server tag without its -native suffix. Both images ship the same
+config/ and run as 1000:1000. Each of initContainers.configSeed.image.registry,
+.repository and .tag replaces the derived value when set. Fails on the native
+flavor when image.tag has no -native suffix and no tag override is set.
+*/}}
+{{- define "arcadedb.configSeed.image" -}}
+{{- $seed := (.Values.initContainers | default dict).configSeed | default dict -}}
+{{- $override := $seed.image | default dict -}}
+{{- $tag := include "arcadedb.image.tag" . -}}
+{{- if and (include "arcadedb.native" .) (not $override.tag) -}}
+{{- if not (hasSuffix "-native" $tag) -}}
+{{- fail (printf "config-seed needs a JVM image with a shell, and image.tag '%s' does not end in -native, so its JVM tag cannot be derived. Set initContainers.configSeed.image.tag (or .registry / .repository) to the JVM image of the same ArcadeDB version, or set initContainers.configSeed.enabled=false." $tag) -}}
+{{- end -}}
+{{- $tag = trimSuffix "-native" $tag -}}
+{{- end -}}
+{{- printf "%s/%s:%s" ($override.registry | default .Values.image.registry) ($override.repository | default .Values.image.repository) ($override.tag | default $tag) -}}
+{{- end -}}
+
+{{/*
+The config-seed init container. It runs the image named by
+arcadedb.configSeed.image with the volume that holds configDirectory mounted at
+/config-seed instead of over the image's config/, and copies each file the
+directory does not hold yet. Existing files, including ones the server or an
+operator changed, are never overwritten.
+Skipped when disabled, and when no volumeMounts entry holds configDirectory
+(nothing would outlive the init container).
 A values file without the key (helm upgrade --reuse-values) keeps it on.
 */}}
 {{- define "arcadedb.configSeed.container" -}}
 {{- $seed := (.Values.initContainers | default dict).configSeed | default dict -}}
 {{- $enabled := or (not (hasKey $seed "enabled")) $seed.enabled -}}
 {{- $mount := include "arcadedb.configSeed.mount" . | fromJson -}}
-{{- if and $enabled $mount (not (include "arcadedb.native" .)) -}}
+{{- if and $enabled $mount -}}
 {{- $configDir := trimSuffix "/" .Values.arcadedb.configDirectory -}}
 {{- $target := printf "/config-seed%s" (trimPrefix (trimSuffix "/" (toString $mount.mountPath)) $configDir) -}}
 {{- $source := printf "%s/config" (trimSuffix "/" .Values.arcadedb.installDirectory) }}
 - name: config-seed
-  image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "arcadedb.image.tag" . }}"
+  image: {{ include "arcadedb.configSeed.image" . | quote }}
   imagePullPolicy: {{ .Values.image.pullPolicy }}
   {{- with .Values.securityContext }}
   securityContext:

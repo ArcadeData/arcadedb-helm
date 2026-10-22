@@ -184,9 +184,10 @@ of `bin/server.sh`. Compared with the JVM flavor:
   `ARCADEDB_OPTS_MEMORY`, `ARCADEDB_SETTINGS`) have no effect. Pass `-D` and heap
   flags through `arcadedb.extraCommands`, e.g. `-Xmx2g`.
 - `bin/console.sh` and `kubectl exec ... sh` are not available in the pod.
-- The `config-seed` init container is skipped (it needs a shell), so the config
-  volume gets no `server-groups.json` from the image: the server uses its
-  built-in default, which has no `readonly` group. See
+- The `config-seed` init container needs a shell, so it runs the JVM image of
+  the same version (the server tag without `-native`), one more image pull per
+  node. With an `image.tag` that does not end in `-native`, set
+  `initContainers.configSeed.image.tag`, or the render fails. See
   [Default config files](#default-config-files).
 - When you set `image.tag` yourself, choose the `image.flavor` that matches it
   (e.g. `image.tag=latest-native` with `image.flavor=native`).
@@ -202,6 +203,9 @@ of `bin/server.sh`. Compared with the JVM flavor:
 | `initContainers.configDirectory.image.tag`            | Tag for the config-chown image                                                                               | `1.37.0`          |
 | `initContainers.configDirectory.image.pullPolicy`     | Pull policy for the config-chown image                                                                       | `IfNotPresent`    |
 | `initContainers.configSeed.enabled`                   | Copy missing default config files from the server image into the config directory (`config-seed`)           | `true`            |
+| `initContainers.configSeed.image.registry`            | Registry for the config-seed image. Empty = `image.registry`                                                 | `""`              |
+| `initContainers.configSeed.image.repository`          | Repository for the config-seed image. Empty = `image.repository`                                             | `""`              |
+| `initContainers.configSeed.image.tag`                 | Tag for the config-seed image. Empty = the server tag, without `-native` on the native flavor                | `""`              |
 | `initContainers.otherContainers`                      | Additional init containers, rendered verbatim after config-chown and config-seed                             | `[]`              |
 
 ### serviceAccount
@@ -546,8 +550,16 @@ hand survive restarts. The logging files are not seeded: the chart ships
 `arcadedb-log.properties` from a ConfigMap (see `arcadedb.logging`). The container uses `securityContext`, so
 it runs as the ArcadeDB user, and it runs after `config-chown` when that one is enabled.
 
-It is skipped with `image.flavor=native` (the native image has no shell), when no `volumeMounts` entry holds
-`arcadedb.configDirectory`, and when `initContainers.configSeed.enabled` is `false`.
+The native image (`image.flavor=native`) has no shell, so there `config-seed` runs the JVM image of the same
+version instead: same registry and repository, the server tag without its `-native` suffix (`26.10.2-native`
+becomes `26.10.2`, `latest-native` becomes `latest`). Both images ship the same `config/` and run as 1000:1000.
+This costs one more image pull per node. When `image.tag` does not end in `-native`, the JVM tag cannot be
+derived and the render fails: set `initContainers.configSeed.image.tag` (and `.registry` / `.repository` for a
+different location) to the JVM image of the same ArcadeDB version. The same three values override the
+config-seed image on the JVM flavor too.
+
+It is skipped when no `volumeMounts` entry holds `arcadedb.configDirectory`, and when
+`initContainers.configSeed.enabled` is `false`.
 
 **Existing installs.** A release installed with an earlier chart version gets the files on the first start
 after the upgrade, unless its config volume already holds them. If the volume already holds a

@@ -524,11 +524,22 @@ initContainers:
   ## configuration. The config-seed init container runs the server image, with the
   ## config volume mounted elsewhere so the image's files stay visible, and copies
   ## each of those files that the config directory does not hold yet. Files already
-  ## there are never overwritten. Skipped on image.flavor=native (no shell) and when
-  ## no volumeMounts entry holds arcadedb.configDirectory. Runs after config-chown.
+  ## there are never overwritten. Skipped when no volumeMounts entry holds
+  ## arcadedb.configDirectory. Runs after config-chown.
+  ## The native image (image.flavor=native) has no shell, so there config-seed runs
+  ## the JVM image of the same version instead: the server tag without its -native
+  ## suffix (an extra image pull per node). With an image.tag that does not end in
+  ## -native, set image.tag below, or the render fails.
   configSeed:
     ## @param initContainers.configSeed.enabled Seed missing default config files from the server image
     enabled: true
+    image:
+      ## @param initContainers.configSeed.image.registry Registry for the config-seed image. Empty = image.registry
+      registry: ""
+      ## @param initContainers.configSeed.image.repository Repository for the config-seed image. Empty = image.repository
+      repository: ""
+      ## @param initContainers.configSeed.image.tag Tag for the config-seed image. Empty = the server tag (without -native on the native flavor)
+      tag: ""
   ## @param initContainers.otherContainers Additional init containers, rendered verbatim after config-chown and config-seed
   otherContainers: []
 
