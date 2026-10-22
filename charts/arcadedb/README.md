@@ -101,6 +101,7 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `arcadedb.plugins.bolt.port`              | Bolt protocol port                                      | `7687` when enabled   |
 | `arcadedb.plugins.gremlin.enabled`        | Enable Gremlin protocol support                         | not set               |
 | `arcadedb.plugins.gremlin.port`           | Gremlin protocol port; only `8182` is accepted (see below) | `8182` when enabled  |
+| `arcadedb.plugins.gremlin.portManagedExternally` | Accept a `port` other than `8182` because your own `gremlin-server.yaml` sets it (see below) | `false` |
 | `arcadedb.plugins.postgres.enabled`       | Enable PostgreSQL protocol support                      | not set               |
 | `arcadedb.plugins.postgres.port`          | PostgreSQL protocol port                                | `5432` when enabled  |
 | `arcadedb.plugins.mongo.enabled`          | Enable MongoDB protocol support                         | not set               |
@@ -117,6 +118,20 @@ The Gremlin plugin takes its port from `gremlin-server.yaml` (the image's sets n
 `8182`), not from a `-D` setting, so the chart cannot move it. `arcadedb.plugins.gremlin.port` only sets the port
 the Services and the NetworkPolicy expose, and any value other than `8182` fails the render instead of pointing
 them at a port nothing listens on.
+
+To run Gremlin on another port, set `port:` in the `gremlin-server.yaml` on the config volume (the `config-seed`
+init container copies the image's file there only when it is absent, so an edited file is kept), then set
+`arcadedb.plugins.gremlin.port` to the same value and `arcadedb.plugins.gremlin.portManagedExternally: true`.
+The chart then exposes that port without checking it; keeping the two in step is up to you:
+
+```yaml
+arcadedb:
+  plugins:
+    gremlin:
+      enabled: true
+      port: 8183
+      portManagedExternally: true
+```
 
 ### arcadedb.credentials
 

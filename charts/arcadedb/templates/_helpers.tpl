@@ -166,8 +166,16 @@ parameters, service and networkPolicy helpers build on this output.
         server-configuration.json drops keys that are not GlobalConfiguration settings.
         Any other value would point the Service and NetworkPolicy at a port nothing
         listens on, so refuse it (#47).
+        portManagedExternally: true is the operator's statement that their own
+        gremlin-server.yaml on the config volume sets that port (#52): the value is
+        then only what the Services and the NetworkPolicy expose, and the chart
+        still passes no port to the server.
         */}}
-        {{- if ne (int $port) 8182 }}
+        {{- if eq (toString $config.portManagedExternally) "true" }}
+          {{- if or (lt (int $port) 1) (gt (int $port) 65535) }}
+            {{- fail (printf "arcadedb.plugins.gremlin.port is %v, which is not a TCP port (1-65535)." $port) -}}
+          {{- end }}
+        {{- else if ne (int $port) 8182 }}
           {{- fail (printf "arcadedb.plugins.gremlin.port is %v, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182." $port) -}}
         {{- end }}
       {{- else if eq $plugin "postgres" }}
