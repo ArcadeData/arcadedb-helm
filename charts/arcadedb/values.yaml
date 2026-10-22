@@ -272,7 +272,8 @@ tls:
 
     ## @section tls.secretRef.passwordSecret
     ## Secret holding the key store / trust store password. When name is empty the
-    ## root password secret is used. Injected through an env var, never inlined.
+    ## root password secret is used. Injected through the arcadedb.ssl.keyStorePassword /
+    ## arcadedb.ssl.trustStorePassword env vars, never inlined or put on the command line.
     passwordSecret:
       ## @param tls.secretRef.passwordSecret.name Secret name ("" = root password secret)
       name: ""

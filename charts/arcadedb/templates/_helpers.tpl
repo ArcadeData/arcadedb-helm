@@ -332,8 +332,11 @@ rootPassword
 {{- end -}}
 
 {{/*
-TLS parameters. Store passwords come from the TLS_STORE_PASSWORD env var
-(a secretKeyRef), so they never appear in the pod spec.
+TLS parameters. The store passwords are deliberately NOT passed here: a
+-D...=$(VAR) argument is expanded by Kubernetes into the argument itself and is
+then readable through /proc/<pid>/cmdline (issue #41). They are set instead by
+"arcadedb.tls.passwordEnv" as environment variables named after the setting
+keys, which the server reads when no system property of that name is set.
 */}}
 {{- define "arcadedb.tls.parameters" -}}
 {{- if .Values.tls.enabled }}
@@ -361,9 +364,26 @@ TLS parameters. Store passwords come from the TLS_STORE_PASSWORD env var
 - -Djavax.net.ssl.trustStoreType={{ $trustStoreFormat }}
   {{- end }}
 - -Darcadedb.ssl.keyStore={{ printf "%s/%s" .Values.tls.mountPath $keyStoreKey }}
-- -Darcadedb.ssl.keyStorePassword=$(TLS_STORE_PASSWORD)
 - -Darcadedb.ssl.trustStore={{ printf "%s/%s" .Values.tls.mountPath $trustStoreKey }}
-- -Darcadedb.ssl.trustStorePassword=$(TLS_STORE_PASSWORD)
+{{- end }}
+{{- end -}}
+
+{{/*
+TLS store password environment variables (issue #41). GlobalConfiguration falls
+back to System.getenv(<setting key>) for every setting, so an env var literally
+named arcadedb.ssl.keyStorePassword configures the key store password without
+putting it on the command line. Kubernetes accepts '.' in env var names. Both
+come from the same secretKeyRef, which never inlines the value in the pod spec.
+*/}}
+{{- define "arcadedb.tls.passwordEnv" -}}
+{{- if .Values.tls.enabled }}
+{{- range $key := list "arcadedb.ssl.keyStorePassword" "arcadedb.ssl.trustStorePassword" }}
+- name: {{ $key }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "arcadedb.tls.passwordSecretName" $ }}
+      key: {{ include "arcadedb.tls.passwordSecretKey" $ }}
+{{- end }}
 {{- end }}
 {{- end -}}
 

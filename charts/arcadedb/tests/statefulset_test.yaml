@@ -322,19 +322,110 @@ tests:
       tls.enabled: true
     asserts:
       - contains:
-          path: spec.template.spec.containers[0].command
-          content: "-Darcadedb.ssl.keyStorePassword=$(TLS_STORE_PASSWORD)"
-      - contains:
-          path: spec.template.spec.containers[0].command
-          content: "-Darcadedb.ssl.trustStorePassword=$(TLS_STORE_PASSWORD)"
-      - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: TLS_STORE_PASSWORD
+            name: arcadedb.ssl.keyStorePassword
             valueFrom:
               secretKeyRef:
                 name: arcadedb-credentials-secret
                 key: rootPassword
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.ssl.trustStorePassword
+            valueFrom:
+              secretKeyRef:
+                name: arcadedb-credentials-secret
+                key: rootPassword
+
+  # Issue #41: Kubernetes expands $(VAR) into the argument itself, so a
+  # -Darcadedb.ssl.*Password=$(...) flag puts the store password (by default the
+  # root password) in /proc/<pid>/cmdline. The server reads every setting from an
+  # environment variable named after its key, so the password stays in the env.
+  - it: TLS store passwords are not on the server command line (#41)
+    set:
+      tls.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.keyStorePassword=$(TLS_STORE_PASSWORD)"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.trustStorePassword=$(TLS_STORE_PASSWORD)"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.keyStorePassword=$(arcadedb.ssl.keyStorePassword)"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.trustStorePassword=$(arcadedb.ssl.trustStorePassword)"
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.keyStore=/etc/certs/arcadedb/keystore.p12"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: TLS_STORE_PASSWORD
+
+  - it: TLS store passwords stay off the native image command line too (#41)
+    set:
+      tls.enabled: true
+      image.flavor: native
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.keyStorePassword=$(TLS_STORE_PASSWORD)"
+      - notContains:
+          path: spec.template.spec.containers[0].command
+          content: "-Darcadedb.ssl.trustStorePassword=$(TLS_STORE_PASSWORD)"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: arcadedb.ssl.keyStorePassword
+      - contains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: arcadedb.ssl.trustStorePassword
+
+  - it: a dedicated tls.secretRef.passwordSecret feeds both store password env vars (#41)
+    set:
+      tls.enabled: true
+      tls.secretRef.passwordSecret.name: my-tls-pass
+      tls.secretRef.passwordSecret.key: storePassword
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.ssl.keyStorePassword
+            valueFrom:
+              secretKeyRef:
+                name: my-tls-pass
+                key: storePassword
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.ssl.trustStorePassword
+            valueFrom:
+              secretKeyRef:
+                name: my-tls-pass
+                key: storePassword
+
+  - it: a custom root password Secret is the store password default (#41)
+    set:
+      tls.enabled: true
+      arcadedb.credentials.rootPassword.secret.name: my-root
+      arcadedb.credentials.rootPassword.secret.key: pw
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: arcadedb.ssl.keyStorePassword
+            valueFrom:
+              secretKeyRef:
+                name: my-root
+                key: pw
 
   - it: TLS_STORE_PASSWORD is absent without TLS
     asserts:
@@ -343,6 +434,19 @@ tests:
           any: true
           content:
             name: TLS_STORE_PASSWORD
+
+  - it: store password env vars are absent without TLS (#41)
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: arcadedb.ssl.keyStorePassword
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          any: true
+          content:
+            name: arcadedb.ssl.trustStorePassword
 
   - it: PID file and XDG cache follow arcadedb.tmpDirectory
     set:
