@@ -268,7 +268,7 @@ tests:
       arcadedb.plugins.postgres.enabled: true
     asserts:
       - failedTemplate:
-          errorPattern: "tls.postgres must be DISABLED, OPTIONAL or REQUIRED"
+          errorMessage: 'tls.postgres must be DISABLED, OPTIONAL or REQUIRED (got "REQUIERED")'
 
   - it: TLS volume mount uses the configured path and secret
     set:
@@ -1061,7 +1061,7 @@ tests:
       arcadedb.configDirectory: /custom/config
     asserts:
       - failedTemplate:
-          errorPattern: "arcadedb.configDirectory \\(/custom/config\\) is not on any volumeMounts entry"
+          errorMessage: "arcadedb.configDirectory (/custom/config) is not on any volumeMounts entry, so the server cannot write users or tokens under readOnlyRootFilesystem: update the arcadedb-config mountPath in volumeMounts to match"
 
   - it: a configDirectory under a mounted parent directory is accepted
     set:
@@ -1079,7 +1079,7 @@ tests:
       arcadedb.configDirectory: /home/arcadedb/configuration
     asserts:
       - failedTemplate:
-          errorPattern: "is not on any volumeMounts entry"
+          errorMessage: "arcadedb.configDirectory (/home/arcadedb/configuration) is not on any volumeMounts entry, so the server cannot write users or tokens under readOnlyRootFilesystem: update the arcadedb-config mountPath in volumeMounts to match"
 
   - it: an unmounted configDirectory is allowed with a writable root filesystem
     set:
@@ -1188,14 +1188,19 @@ tests:
           path: spec.template.spec.initContainers[0].name
           value: config-chown
 
+  # The custom configDirectory is mounted in the ArcadeDB container, so the
+  # volumeMounts guard passes and the render fails on the config-chown guard (#59).
   - it: config-chown fails when mountPath does not contain the config dir
     set:
       arcadedb.configDirectory: /var/lib/arcadedb/config
       initContainers.configDirectory.volumeName: arcadedb-config
       initContainers.configDirectory.mountPath: /mnt/arcadedb-config
+      volumeMounts:
+        - name: arcadedb-config
+          mountPath: /var/lib/arcadedb/config
     asserts:
       - failedTemplate:
-          errorPattern: "must be arcadedb.configDirectory .* or one of its parent directories"
+          errorMessage: "initContainers.configDirectory.mountPath (/mnt/arcadedb-config) must be arcadedb.configDirectory (/var/lib/arcadedb/config) or one of its parent directories: use the path the volume is mounted at in the ArcadeDB container"
 
   - it: config-chown rejects a sibling path that only shares a prefix
     set:
@@ -1204,7 +1209,7 @@ tests:
       initContainers.configDirectory.mountPath: /home/arcadedb/conf
     asserts:
       - failedTemplate:
-          errorPattern: "must be arcadedb.configDirectory"
+          errorMessage: "initContainers.configDirectory.mountPath (/home/arcadedb/conf) must be arcadedb.configDirectory (/home/arcadedb/config) or one of its parent directories: use the path the volume is mounted at in the ArcadeDB container"
 
   - it: config-chown requires securityContext.runAsUser
     set:
@@ -1213,7 +1218,7 @@ tests:
       initContainers.configDirectory.mountPath: /home/arcadedb/config
     asserts:
       - failedTemplate:
-          errorPattern: "requires securityContext.runAsUser"
+          errorMessage: "initContainers.configDirectory requires securityContext.runAsUser to know which user should own the config directory"
 
   - it: config-chown is omitted without a volume name
     set:

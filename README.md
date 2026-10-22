@@ -88,6 +88,11 @@ make test              # run all of the above
 
 Unit-test suites live in `charts/arcadedb/tests/` and use [helm-unittest](https://github.com/helm-unittest/helm-unittest). The plugin version is pinned in the `Makefile`.
 
+`failedTemplate` assertions must use an exact `errorMessage`. The pinned plugin drops any other key, `errorPattern`
+included, and a `failedTemplate` without `errorMessage` passes on any render failure. `make test-unit` therefore runs
+`ci/check-failed-template.sh`, which rejects such assertions and runs the suite in `charts/arcadedb/tests/negative-control/`:
+every assertion there must fail, which proves the plugin still compares `errorMessage` with the render error.
+
 `make test-config-keys` renders the chart with representative values and checks that every `-Darcadedb.*` setting it
 passes still exists in the server's `GlobalConfiguration` (the appVersion image by default, `IMAGE_TAG=...` to pick
 another). The server ignores an unknown `-D` property silently, so a renamed setting would otherwise go unnoticed.

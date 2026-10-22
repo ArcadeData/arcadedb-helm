@@ -26,6 +26,7 @@ plugin-install:
 
 test-unit: plugin-install
 	$(HELM) unittest $(CHART_DIR)
+	HELM=$(HELM) bash ci/check-failed-template.sh
 
 test-config-keys:
 	bash ci/check-config-keys.sh
