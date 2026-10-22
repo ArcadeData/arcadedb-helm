@@ -145,14 +145,14 @@ PASSWORD=$(kubectl get secret arcadedb-credentials-secret \
 
 # ── phase 1: pod readiness ────────────────────────────────────────────────────
 
-echo "==> [1/10] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
+echo "==> [1/11] Waiting for StatefulSet rollout (timeout ${ROLLOUT_TIMEOUT}s)..."
 kubectl rollout status statefulset/"$RELEASE" \
   -n "$NAMESPACE" --timeout="${ROLLOUT_TIMEOUT}s"
 echo "    All 3 pods Ready."
 
 # ── phase 2: liveness health probe ────────────────────────────────────────────
 
-echo "==> [2/10] Asserting /api/v1/health liveness endpoint..."
+echo "==> [2/11] Asserting /api/v1/health liveness endpoint..."
 PF_PID=$(pf_start 0 "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to pod-0 failed"; exit 1; }
 assert_health_204 "$HTTP_PORT" || exit 1
@@ -160,14 +160,14 @@ pf_stop "$PF_PID"
 
 # ── phase 3: raft formation ───────────────────────────────────────────────────
 
-echo "==> [3/10] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
+echo "==> [3/11] Checking Raft leader consensus (timeout ${RAFT_TIMEOUT}s)..."
 assert_quorum_n 3 || exit 1
 
 # ── phase 4: write ────────────────────────────────────────────────────────────
 
 # LEADER_ORDINAL is set by assert_quorum_n above.
 
-echo "==> [4/10] Writing test data via leader pod-${LEADER_ORDINAL}..."
+echo "==> [4/11] Writing test data via leader pod-${LEADER_ORDINAL}..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader pod-${LEADER_ORDINAL} failed"; exit 1; }
 
@@ -187,7 +187,7 @@ echo "    Write complete."
 
 # ── phase 5: read and assert ──────────────────────────────────────────────────
 
-echo "==> [5/10] Reading back test data..."
+echo "==> [5/11] Reading back test data..."
 RESULT=$(api "$HTTP_PORT" POST /api/v1/query/integration-test \
   '{"language":"sql","command":"SELECT name FROM TestDoc WHERE name = '\''hello-kind'\''"}' \
   | jq -r '.result[0].name // empty') || {
@@ -206,7 +206,7 @@ echo "    Got: '${RESULT}'"
 
 # ── phase 6: STATUS column ────────────────────────────────────────────────────
 
-echo "==> [6/10] Asserting STATUS=HEALTHY for all peers..."
+echo "==> [6/11] Asserting STATUS=HEALTHY for all peers..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -216,7 +216,7 @@ pf_stop "$PF_PID"
 
 # ── phase 7: leadership transfer ──────────────────────────────────────────────
 
-echo "==> [7/10] Transferring Raft leadership..."
+echo "==> [7/11] Transferring Raft leadership..."
 PF_PID=$(pf_start "$LEADER_ORDINAL" "$HTTP_PORT")
 pf_wait "$HTTP_PORT" || { echo "ERROR: port-forward to leader failed"; exit 1; }
 
@@ -289,9 +289,9 @@ LEADER_ORDINAL=$NEW_LEADER_ORDINAL
 if [[ "$IMAGE_FLAVOR" == "native" ]]; then
   # The native image has no shell and no bin/console.sh, and the chart sets no
   # ARCADEDB_SETTINGS for it, so there is nothing for this phase to exercise.
-  echo "==> [8/10] Skipped: the native image has no shell or console."
+  echo "==> [8/11] Skipped: the native image has no shell or console."
 else
-  echo "==> [8/10] Asserting the console can write its history file..."
+  echo "==> [8/11] Asserting the console can write its history file..."
   POD="${RELEASE}-0"
 
   # bin/console.sh asks JLine for the relative history file ".history", resolved
@@ -358,11 +358,11 @@ TOKEN=$(kubectl get secret arcadedb-credentials-secret \
 
 if [[ "$IMAGE_FLAVOR" == "native" ]]; then
   # No shell in the native image to read /proc from; the pod spec is checked instead.
-  echo "==> [9/10] Asserting credentials are passed as files (pod spec, native image)..."
+  echo "==> [9/11] Asserting credentials are passed as files (pod spec, native image)..."
   CMDLINE=$(kubectl get pod -n "$NAMESPACE" "${RELEASE}-0" \
     -o jsonpath='{range .spec.containers[0].command[*]}{@}{"\n"}{end}')
 else
-  echo "==> [9/10] Asserting credentials are passed as files, not on the command line..."
+  echo "==> [9/11] Asserting credentials are passed as files, not on the command line..."
   CMDLINE=$(kubectl exec -n "$NAMESPACE" "${RELEASE}-0" -- \
     sh -c 'tr "\0" "\n" </proc/1/cmdline')
 fi
@@ -381,7 +381,7 @@ echo "    Root password and cluster token are read from files; neither is in the
 
 # ── phase 10: logging configuration is loaded (issue #38) ────────────────────
 
-echo "==> [10/10] Asserting the server loaded the chart's logging configuration..."
+echo "==> [10/11] Asserting the server loaded the chart's logging configuration..."
 POD="${RELEASE}-0"
 
 # The arcadedb-config volume hides the image's config/arcadedb-log.properties.
@@ -407,6 +407,32 @@ else
     exit 1
   }
   echo "    Server log written to the configured logs directory."
+fi
+
+# ── phase 11: default config files are seeded (issue #39) ───────────────────
+
+POD="${RELEASE}-0"
+INIT_NAMES=$(kubectl get pod -n "$NAMESPACE" "$POD" \
+  -o jsonpath='{.spec.initContainers[*].name}')
+if [[ "$IMAGE_FLAVOR" == "native" ]]; then
+  echo "==> [11/11] Asserting config-seed is skipped on the native image..."
+  if [[ " $INIT_NAMES " == *" config-seed "* ]]; then
+    echo "ERROR: config-seed rendered on the native image, which has no shell"
+    exit 1
+  fi
+  echo "    No config-seed init container on the native image."
+else
+  echo "==> [11/11] Asserting the image's server-groups.json was seeded..."
+  # The arcadedb-config volume hides the image's config/. Without the seed the
+  # server uses its built-in groups, which has no readonly group.
+  # The CI install keeps the default arcadedb.configDirectory.
+  kubectl exec -n "$NAMESPACE" "$POD" -- \
+    grep -q '"readonly"' /home/arcadedb/config/server-groups.json || {
+    echo "ERROR: server-groups.json has no readonly group; init containers: ${INIT_NAMES:-<none>}"
+    kubectl logs -n "$NAMESPACE" "$POD" -c config-seed || true
+    exit 1
+  }
+  echo "    server-groups.json holds the image's readonly group."
 fi
 
 # Two more phases, helm-upgrade scale-up 3->5 and snapshot-install recovery (once

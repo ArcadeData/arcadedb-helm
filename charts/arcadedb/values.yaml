@@ -516,7 +516,20 @@ initContainers:
       tag: "1.37.0"
       ## @param initContainers.configDirectory.image.pullPolicy Pull policy for the config-chown image
       pullPolicy: IfNotPresent
-  ## @param initContainers.otherContainers Additional init containers, rendered verbatim after config-chown
+  ## @section initContainers.configSeed
+  ## The volume at arcadedb.configDirectory hides the files the image ships in
+  ## <installDirectory>/config. Without server-groups.json the server uses a
+  ## built-in default that lacks the "readonly" group; without gremlin-server.yaml
+  ## (and its .properties / .groovy) the Gremlin plugin starts from an empty
+  ## configuration. The config-seed init container runs the server image, with the
+  ## config volume mounted elsewhere so the image's files stay visible, and copies
+  ## each of those files that the config directory does not hold yet. Files already
+  ## there are never overwritten. Skipped on image.flavor=native (no shell) and when
+  ## no volumeMounts entry holds arcadedb.configDirectory. Runs after config-chown.
+  configSeed:
+    ## @param initContainers.configSeed.enabled Seed missing default config files from the server image
+    enabled: true
+  ## @param initContainers.otherContainers Additional init containers, rendered verbatim after config-chown and config-seed
   otherContainers: []
 
 ## @param nodeSelector Node selector

@@ -524,6 +524,7 @@ Returns YAML (possibly empty).
     - name: {{ $cfg.volumeName }}
       mountPath: {{ $cfg.mountPath }}
 {{- end }}
+{{- include "arcadedb.configSeed.container" . }}
 {{- with .Values.initContainers.otherContainers }}
 {{ toYaml . }}
 {{- end }}
@@ -683,6 +684,95 @@ every reserved name as an emptyDir, and the persistence.* flags must still win.
 {{- if not (and .name (hasKey $generated .name)) -}}{{- $volumes = append $volumes . -}}{{- end -}}
 {{- end -}}
 {{- dict "claims" $claims "volumes" (concat $fallback $volumes) "ephemeral" $ephemeral | toJson -}}
+{{- end -}}
+
+{{/*
+Config directory seeding (issue #39). The arcadedb-config volume hides every file
+the image ships in installDirectory/config. Two of them change behaviour when
+missing: server-groups.json (the server uses a built-in default without the
+"readonly" group) and gremlin-server.yaml with its .properties / .groovy (the
+Gremlin plugin starts from an empty Settings). The logging files are left out:
+the chart ships arcadedb-log.properties from a ConfigMap (#38).
+*/}}
+{{- define "arcadedb.configSeed.files" -}}
+{{- list "server-groups.json" "gremlin-server.yaml" "gremlin-server.properties" "gremlin-server.groovy" | toJson -}}
+{{- end -}}
+
+{{/*
+The volumeMounts entry that holds arcadedb.configDirectory: the deepest mountPath
+that is the directory or one of its parents. Returns JSON {} when none does.
+*/}}
+{{- define "arcadedb.configSeed.mount" -}}
+{{- $configDir := trimSuffix "/" .Values.arcadedb.configDirectory -}}
+{{- $found := dict -}}
+{{- $depth := -1 -}}
+{{- range .Values.volumeMounts -}}
+{{- $mountPath := trimSuffix "/" (toString .mountPath) -}}
+{{- if and .name (or (eq $configDir $mountPath) (hasPrefix (printf "%s/" $mountPath) $configDir)) (gt (len $mountPath) $depth) -}}
+{{- $found = . -}}
+{{- $depth = len $mountPath -}}
+{{- end -}}
+{{- end -}}
+{{- $found | toJson -}}
+{{- end -}}
+
+{{/*
+The config-seed init container. It runs the server image itself (same registry,
+repository and tag, so the defaults match the server version) with the volume
+that holds configDirectory mounted at /config-seed instead of over the image's
+config/, and copies each file the directory does not hold yet. Existing files,
+including ones the server or an operator changed, are never overwritten.
+Skipped on the native image (no shell), when disabled, and when no volumeMounts
+entry holds configDirectory (nothing would outlive the init container).
+A values file without the key (helm upgrade --reuse-values) keeps it on.
+*/}}
+{{- define "arcadedb.configSeed.container" -}}
+{{- $seed := (.Values.initContainers | default dict).configSeed | default dict -}}
+{{- $enabled := or (not (hasKey $seed "enabled")) $seed.enabled -}}
+{{- $mount := include "arcadedb.configSeed.mount" . | fromJson -}}
+{{- if and $enabled $mount (not (include "arcadedb.native" .)) -}}
+{{- $configDir := trimSuffix "/" .Values.arcadedb.configDirectory -}}
+{{- $target := printf "/config-seed%s" (trimPrefix (trimSuffix "/" (toString $mount.mountPath)) $configDir) -}}
+{{- $source := printf "%s/config" (trimSuffix "/" .Values.arcadedb.installDirectory) }}
+- name: config-seed
+  image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ include "arcadedb.image.tag" . }}"
+  imagePullPolicy: {{ .Values.image.pullPolicy }}
+  {{- with .Values.securityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  command:
+    - sh
+    - -c
+    - |
+      set -e
+      src="$1"; dst="$2"; shift 2
+      mkdir -p "$dst"
+      for f in "$@"; do
+        if [ -e "$dst/$f" ]; then
+          echo "config-seed: keeping existing $f"
+        elif [ -f "$src/$f" ]; then
+          cat "$src/$f" > "$dst/.$f.seed"
+          mv "$dst/.$f.seed" "$dst/$f"
+          echo "config-seed: seeded $f"
+        else
+          echo "config-seed: $f is not in the image, skipped"
+        fi
+      done
+  args:
+    - config-seed
+    - {{ $source | quote }}
+    - {{ $target | quote }}
+    {{- range include "arcadedb.configSeed.files" . | fromJsonArray }}
+    - {{ . | quote }}
+    {{- end }}
+  volumeMounts:
+    - name: {{ $mount.name }}
+      mountPath: /config-seed
+      {{- with $mount.subPath }}
+      subPath: {{ . }}
+      {{- end }}
+{{- end }}
 {{- end -}}
 
 {{/*

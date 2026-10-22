@@ -1090,13 +1090,16 @@ tests:
           path: spec.template.spec.containers[0].command
           content: "-Darcadedb.server.configDirectory=/custom/config"
 
-  - it: initContainers are omitted by default
+  - it: initContainers are omitted by default when config seeding is off
+    set:
+      initContainers.configSeed.enabled: false
     asserts:
       - notExists:
           path: spec.template.spec.initContainers
 
   - it: config-chown mounts the volume where ArcadeDB does and chowns the config dir
     set:
+      initContainers.configSeed.enabled: false
       initContainers.configDirectory.volumeName: arcadedb-config
       initContainers.configDirectory.mountPath: /home/arcadedb/config
     asserts:
@@ -1214,6 +1217,7 @@ tests:
 
   - it: config-chown is omitted without a volume name
     set:
+      initContainers.configSeed.enabled: false
       arcadedb.backupConfigMap: backup
       initContainers.configDirectory.mountPath: /home/arcadedb/config
     asserts:
@@ -1222,6 +1226,7 @@ tests:
 
   - it: custom init containers render after config-chown
     set:
+      initContainers.configSeed.enabled: false
       initContainers.configDirectory.volumeName: arcadedb-config
       initContainers.configDirectory.mountPath: /home/arcadedb/config
       initContainers.otherContainers:
@@ -1238,6 +1243,7 @@ tests:
 
   - it: custom init containers render on their own
     set:
+      initContainers.configSeed.enabled: false
       initContainers.otherContainers:
         - name: custom-init
           image: busybox:1.37.0

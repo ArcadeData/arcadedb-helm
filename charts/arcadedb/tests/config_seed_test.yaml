@@ -1,0 +1,227 @@
+suite: Config directory seeding (server-groups.json, gremlin-server.*)
+templates:
+  - statefulset.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  # Issue #39: the arcadedb-config volume hides every file the image ships in
+  # /home/arcadedb/config. Without server-groups.json the server uses its
+  # built-in default (no "readonly" group); without gremlin-server.yaml the
+  # Gremlin plugin starts from an empty Settings. The config-seed init container
+  # runs the server image with the volume mounted elsewhere, so the image's
+  # files stay visible, and copies each missing file onto the volume.
+  - it: seeds the config volume from the server image by default
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 1
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-seed
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: arcadedata/arcadedb:26.10.2
+      - equal:
+          path: spec.template.spec.initContainers[0].imagePullPolicy
+          value: IfNotPresent
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          value:
+            - name: arcadedb-config
+              mountPath: /config-seed
+      - equal:
+          path: spec.template.spec.initContainers[0].command[0]
+          value: sh
+      - equal:
+          path: spec.template.spec.initContainers[0].command[1]
+          value: -c
+      - equal:
+          path: spec.template.spec.initContainers[0].args
+          value:
+            - config-seed
+            - /home/arcadedb/config
+            - /config-seed
+            - server-groups.json
+            - gremlin-server.yaml
+            - gremlin-server.properties
+            - gremlin-server.groovy
+
+  - it: copies a file only when the volume does not hold it yet
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'if \[ -e "\$dst/\$f" \]'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'mv "\$dst/\.\$f\.seed" "\$dst/\$f"'
+
+  - it: never seeds the logging files, which the chart ships from a ConfigMap (#38)
+    asserts:
+      - notContains:
+          path: spec.template.spec.initContainers[0].args
+          content: arcadedb-log.properties
+      - notContains:
+          path: spec.template.spec.initContainers[0].args
+          content: arcadedb-log-all.properties
+
+  - it: runs with the container securityContext, as the user that owns the config files
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext
+          value:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+  - it: follows image.registry, repository, tag and pullPolicy, so the defaults match the server version
+    set:
+      image.registry: registry.example.com
+      image.repository: mirror/arcadedb
+      image.tag: 26.11.1
+      image.pullPolicy: Always
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.example.com/mirror/arcadedb:26.11.1
+      - equal:
+          path: spec.template.spec.initContainers[0].imagePullPolicy
+          value: Always
+
+  - it: seeds the emptyDir config volume when config persistence is off (issue repro)
+    set:
+      persistence.enabled: false
+      persistence.config.enabled: false
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-seed
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: arcadedb-config
+            emptyDir: {}
+
+  - it: still seeds when backup.json and mcp-config.json are mounted into the config directory
+    set:
+      arcadedb.backupConfigMap: backup
+      arcadedb.mcpConfigMap: mcp
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-seed
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          value:
+            - name: arcadedb-config
+              mountPath: /config-seed
+
+  - it: is skipped on the native image, which has no shell
+    set:
+      image.flavor: native
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  - it: is skipped when initContainers.configSeed.enabled is false
+    set:
+      initContainers.configSeed.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  - it: stays on when the configSeed key is missing (helm upgrade --reuse-values from an older release)
+    set:
+      initContainers.configSeed: null
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-seed
+
+  - it: is skipped when no volume backs the config directory
+    set:
+      arcadedb.configDirectory: /custom/config
+      securityContext.readOnlyRootFilesystem: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  - it: writes into the config directory below a volume mounted at one of its parents
+    set:
+      arcadedb.configDirectory: /var/lib/arcadedb/config/
+      volumeMounts:
+        - name: arcadedb-state
+          mountPath: /var/lib/arcadedb/
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          value:
+            - name: arcadedb-state
+              mountPath: /config-seed
+      - equal:
+          path: spec.template.spec.initContainers[0].args[2]
+          value: /config-seed/config
+
+  - it: picks the deepest mount that holds the config directory
+    set:
+      arcadedb.configDirectory: /var/lib/arcadedb/config
+      volumeMounts:
+        - name: arcadedb-state
+          mountPath: /var/lib
+        - name: arcadedb-config
+          mountPath: /var/lib/arcadedb/config
+        - name: arcadedb-other
+          mountPath: /var/lib/arcadedb/conf
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts[0].name
+          value: arcadedb-config
+      - equal:
+          path: spec.template.spec.initContainers[0].args[2]
+          value: /config-seed
+
+  - it: keeps the subPath of the mount that backs the config directory
+    set:
+      volumeMounts:
+        - name: arcadedb-data
+          mountPath: /home/arcadedb/config
+          subPath: config
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          value:
+            - name: arcadedb-data
+              mountPath: /config-seed
+              subPath: config
+
+  - it: reads the defaults from installDirectory/config
+    set:
+      arcadedb.installDirectory: /opt/arcadedb
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].args[1]
+          value: /opt/arcadedb/config
+
+  - it: runs after config-chown, before the custom init containers
+    set:
+      initContainers.configDirectory.volumeName: arcadedb-config
+      initContainers.configDirectory.mountPath: /home/arcadedb/config
+      initContainers.otherContainers:
+        - name: custom-init
+          image: busybox:1.37.0
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 3
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-chown
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: config-seed
+      - equal:
+          path: spec.template.spec.initContainers[2].name
+          value: custom-init
