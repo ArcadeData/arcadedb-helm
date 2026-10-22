@@ -63,7 +63,6 @@ jobs:
         run: |
           helm install test-arcadedb charts/arcadedb/ \
             --set replicaCount=3 \
-            --set persistence.enabled=false \
             --set arcadedb.defaultDatabases="" \
             --set image.tag="${{ inputs.imageTag }}" \
             --set image.pullPolicy="${{ inputs.pullPolicy }}" \

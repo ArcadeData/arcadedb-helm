@@ -5,6 +5,7 @@
 {{- $mountClusterToken := include "arcadedb.credentials.mountClusterToken" . -}}
 {{- /* defaulted: helm upgrade --reuse-values from an older release lacks the key */ -}}
 {{- $credentialsDir := trimSuffix "/" (.Values.arcadedb.credentials.mountPath | default "/etc/arcadedb/secrets") -}}
+{{- $storage := include "arcadedb.persistence.plan" . | fromJson -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -258,7 +259,7 @@ spec:
                       path: clusterToken
               {{- end }}
         {{- end }}
-        {{- with .Values.volumes }}
+        {{- with $storage.volumes }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with .Values.nodeSelector }}
@@ -273,7 +274,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-  {{- with .Values.volumeClaimTemplates }}
+  {{- with concat $storage.claims (.Values.volumeClaimTemplates | default list) }}
   volumeClaimTemplates:
     {{- toYaml . | nindent 4 }}
   {{- end }}
