@@ -9,6 +9,14 @@ arcadedb:
   configDirectory: "/home/arcadedb/config"
   ## @param arcadedb.backupConfigMap ConfigMap containing the backup.json file
   backupConfigMap: null
+  ## @param arcadedb.backupDirectory Directory the server writes backups to
+  ## (scheduled through backupConfigMap, or BACKUP DATABASE), passed as
+  ## -Darcadedb.server.backupDirectory. The chart mounts a writable volume here
+  ## (see persistence.backups) unless a volumeMounts entry already covers it. Must
+  ## not be inside databaseDirectory, where the server would open it as a database.
+  ## Set to "" to leave the server default (<installDirectory>/backups, on the
+  ## read-only root filesystem) and mount nothing.
+  backupDirectory: "/home/arcadedb/backups"
   ## @param arcadedb.mcpConfigMap ConfigMap containing the mcp-config.json file
   mcpConfigMap: null
   ## @param arcadedb.defaultDatabases Databases to create at startup. Empty = none.
@@ -396,6 +404,11 @@ persistence:
   ## @section persistence.config
   ## Persist the config directory (users, groups, API tokens, server settings).
   ## Without this, configured users and tokens are lost on pod restart.
+  ## HA: a persisted config directory relies on observability.health.readinessRequiresHA
+  ## (on by default whenever HA is active). With it, a restarted node reports Ready only
+  ## once it has rejoined the Raft group and caught up, so a rolling update cannot move
+  ## on to the next pod and drop the write quorum (ArcadeData/arcadedb#10536). Turning
+  ## readinessRequiresHA off on an HA cluster makes NOTES.txt print a warning.
   config:
     ## @param persistence.config.enabled Persist the config directory (arcadedb-config) with a separate PVC.
     enabled: true
@@ -418,6 +431,22 @@ persistence:
     ## @param persistence.raft.accessMode PVC access mode for Raft
     accessMode: ReadWriteOnce
     ## @param persistence.raft.storageClass StorageClass name for the Raft PVC. Empty = cluster default.
+    storageClass: ""
+
+  ## @section persistence.backups
+  ## Where arcadedb.backupDirectory lives. Off by default: backups then go to a
+  ## "backups" subPath of the arcadedb-tmp emptyDir, writable under the read-only
+  ## root filesystem but lost with the pod. Enabled, the chart generates a
+  ## per-replica arcadedb-backups PVC and mounts it at arcadedb.backupDirectory.
+  ## A volumeMounts entry that already covers arcadedb.backupDirectory wins over both.
+  backups:
+    ## @param persistence.backups.enabled Persist arcadedb.backupDirectory (arcadedb-backups) with a PVC.
+    enabled: false
+    ## @param persistence.backups.size PVC size for the backups
+    size: 8Gi
+    ## @param persistence.backups.accessMode PVC access mode for the backups
+    accessMode: ReadWriteOnce
+    ## @param persistence.backups.storageClass StorageClass name for the backups PVC. Empty = cluster default.
     storageClass: ""
 
 ## @param volumeMounts Pod volume mounts, rendered verbatim. Defaults mount the
@@ -452,7 +481,8 @@ volumes:
 ## @param volumeClaimTemplates Extra StatefulSet per-replica PVCs, rendered verbatim
 ## after the ones generated from `persistence`. An entry named arcadedb-data /
 ## arcadedb-config / arcadedb-raft replaces the generated claim for that directory;
-## add your own names for backups / replication (with a matching volumeMounts entry).
+## add your own names for replication or other data (with a matching volumeMounts
+## entry). An entry named arcadedb-backups is mounted at arcadedb.backupDirectory.
 volumeClaimTemplates: []
 # - metadata:
 #     name: arcadedb-data
@@ -520,8 +550,8 @@ networkPolicy:
   enabled: false
 
 ## @section observability
-## Opt-in, behavior-preserving observability (ArcadeDB 26.7.1+).
-## Every knob below defaults off; existing deployments are unchanged.
+## Observability (ArcadeDB 26.7.1+). Every knob below defaults off, except
+## health.readinessRequiresHA, which follows HA (on whenever HA is active).
 observability:
   ## @section observability.metrics
   metrics:
@@ -584,7 +614,11 @@ observability:
     includeTrace: false
   ## @section observability.health
   health:
-    ## @param observability.health.readinessRequiresHA /api/v1/ready waits for Raft join on HA clusters
-    readinessRequiresHA: false
+    ## @param observability.health.readinessRequiresHA /api/v1/ready waits until the node has
+    ## joined the Raft group and caught up, so a rolling restart cannot drop the write quorum.
+    ## null (default) = on whenever HA is active (replicaCount > 1 or autoscaling), off on a
+    ## single node. An explicit true or false always wins. Persisting the config directory on
+    ## an HA cluster relies on it: see persistence.config.
+    readinessRequiresHA: null
     ## @param observability.health.readinessHAMaxLag Max Raft log entries a follower may lag behind commit index and still report Ready (requires readinessRequiresHA)
     readinessHAMaxLag: 100

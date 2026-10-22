@@ -127,6 +127,9 @@ spec:
             {{- end }}
             - -Darcadedb.server.configDirectory={{ .Values.arcadedb.configDirectory }}
             - -Darcadedb.server.databaseDirectory={{ .Values.arcadedb.databaseDirectory }}
+            {{- with .Values.arcadedb.backupDirectory }}
+            - -Darcadedb.server.backupDirectory={{ . }}
+            {{- end }}
             - -Darcadedb.server.defaultDatabases={{ .Values.arcadedb.defaultDatabases }}
             {{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled }}
             - -Darcadedb.ha.enabled=true
@@ -184,6 +187,9 @@ spec:
             - name: arcadedb-credentials
               mountPath: {{ $credentialsDir }}
               readOnly: true
+            {{- end }}
+            {{- with (include "arcadedb.backups.mount" . | fromYaml) }}
+            {{- list . | toYaml | nindent 12 }}
             {{- end }}
             {{- with .Values.volumeMounts }}
               {{- toYaml . | nindent 12 }}

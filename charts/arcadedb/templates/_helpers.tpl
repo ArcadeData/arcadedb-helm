@@ -296,7 +296,7 @@ All opt-in; emits nothing when defaults are unchanged.
 - -Darcadedb.serverMetrics.tracing.endpoint={{ $tracing.endpoint }}
 - -Darcadedb.serverMetrics.tracing.samplingRate={{ $tracing.samplingRate }}
 {{- end }}
-{{- if $health.readinessRequiresHA }}
+{{- if include "arcadedb.readinessRequiresHA" . }}
 - -Darcadedb.server.readinessRequiresHA=true
 - -Darcadedb.server.readinessHAMaxLag={{ $health.readinessHAMaxLag }}
 {{- end }}
@@ -611,10 +611,17 @@ every reserved name as an emptyDir, and the persistence.* flags must still win.
 {{- $data := .Values.persistence | default dict -}}
 {{- $config := $data.config | default dict -}}
 {{- $raft := $data.raft | default dict -}}
+{{- $backups := $data.backups | default dict -}}
 {{- $reserved := list
       (dict "name" "arcadedb-data" "settings" $data "enabled" $data.enabled "stateful" true)
       (dict "name" "arcadedb-config" "settings" $config "enabled" $config.enabled "stateful" true)
       (dict "name" "arcadedb-raft" "settings" $raft "enabled" (and $ha $raft.enabled) "stateful" $ha) -}}
+{{- /* Backups only count as state worth keeping once backup.json schedules them. */ -}}
+{{- $backupsStateful := not (empty .Values.arcadedb.backupConfigMap) -}}
+{{- $backupMount := include "arcadedb.backups.mount" . | fromYaml -}}
+{{- if eq (toString $backupMount.name) "arcadedb-backups" -}}
+{{- $reserved = append $reserved (dict "name" "arcadedb-backups" "settings" $backups "enabled" $backups.enabled "stateful" $backupsStateful) -}}
+{{- end -}}
 {{- $userClaims := dict -}}
 {{- range .Values.volumeClaimTemplates -}}
 {{- with .metadata -}}{{- with .name -}}{{- $_ := set $userClaims . true -}}{{- end -}}{{- end -}}
@@ -647,9 +654,78 @@ every reserved name as an emptyDir, and the persistence.* flags must still win.
 {{- if .stateful -}}{{- $ephemeral = append $ephemeral $name -}}{{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if and $backupsStateful $backupMount.subPath -}}
+{{- /* on the arcadedb-tmp emptyDir (persistence.backups off) */ -}}
+{{- $ephemeral = append $ephemeral "arcadedb-backups" -}}
+{{- end -}}
 {{- $volumes := list -}}
 {{- range .Values.volumes -}}
 {{- if not (and .name (hasKey $generated .name)) -}}{{- $volumes = append $volumes . -}}{{- end -}}
 {{- end -}}
 {{- dict "claims" $claims "volumes" (concat $fallback $volumes) "ephemeral" $ephemeral | toJson -}}
+{{- end -}}
+
+{{/*
+Returns "true" when /api/v1/ready should wait for Raft join and catch-up (#42):
+observability.health.readinessRequiresHA when set to true or false, else whether
+HA is active. Without it a rolling restart can move on to the next pod while the
+previous one is still syncing, and drop the write quorum.
+*/}}
+{{- define "arcadedb.readinessRequiresHA" -}}
+{{- $health := (.Values.observability | default dict).health | default dict -}}
+{{- $explicit := $health.readinessRequiresHA -}}
+{{- if kindIs "invalid" $explicit -}}
+{{- include "arcadedb.ha.enabled" . -}}
+{{- else if eq (toString $explicit) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Returns "true" when arcadedb.backupDirectory sits on (or under) one of the
+volumeMounts entries, which then backs it instead of the chart.
+*/}}
+{{- define "arcadedb.backups.coveredByVolumeMounts" -}}
+{{- $dir := trimSuffix "/" (toString .Values.arcadedb.backupDirectory) -}}
+{{- range .Values.volumeMounts -}}
+{{- $mountPath := trimSuffix "/" (toString .mountPath) -}}
+{{- if or (eq $dir $mountPath) (hasPrefix (printf "%s/" $mountPath) $dir) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The volumeMount the chart adds for arcadedb.backupDirectory (#42), as YAML, or
+nothing when backupDirectory is "" or a volumeMounts entry already covers it:
+  - arcadedb-backups, when persistence.backups.enabled or the user declares a
+    volumeClaimTemplates / volumes entry of that name;
+  - else the arcadedb-tmp volume under subPath "backups", when there is one (the
+    default emptyDir): writable, but lost with the pod;
+  - else arcadedb-backups, which the persistence plan backs with an emptyDir.
+Fails when backupDirectory is inside databaseDirectory: the server opens every
+directory there as a database.
+*/}}
+{{- define "arcadedb.backups.mount" -}}
+{{- with .Values.arcadedb.backupDirectory -}}
+{{- $dir := trimSuffix "/" (toString .) -}}
+{{- $dbDir := trimSuffix "/" (toString $.Values.arcadedb.databaseDirectory) -}}
+{{- if or (eq $dir $dbDir) (hasPrefix (printf "%s/" $dbDir) $dir) -}}
+{{- fail (printf "arcadedb.backupDirectory (%s) must be outside arcadedb.databaseDirectory (%s): the server opens every directory there as a database" . $.Values.arcadedb.databaseDirectory) -}}
+{{- end -}}
+{{- if not (include "arcadedb.backups.coveredByVolumeMounts" $) -}}
+{{- $names := dict -}}
+{{- range $.Values.volumeClaimTemplates -}}
+{{- with .metadata -}}{{- with .name -}}{{- $_ := set $names . true -}}{{- end -}}{{- end -}}
+{{- end -}}
+{{- range $.Values.volumes -}}
+{{- with .name -}}{{- $_ := set $names . true -}}{{- end -}}
+{{- end -}}
+{{- $persist := (($.Values.persistence | default dict).backups | default dict).enabled -}}
+{{- if or $persist (hasKey $names "arcadedb-backups") (not (hasKey $names "arcadedb-tmp")) }}
+name: arcadedb-backups
+mountPath: {{ $dir }}
+{{- else }}
+name: arcadedb-tmp
+mountPath: {{ $dir }}
+subPath: backups
+{{- end }}
+{{- end -}}
+{{- end -}}
 {{- end -}}

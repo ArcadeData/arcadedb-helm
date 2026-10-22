@@ -23,13 +23,21 @@
 {{- with (include "arcadedb.persistence.plan" . | fromJson).ephemeral }}
 
 WARNING: {{ join ", " . }} {{ if eq (len .) 1 }}is{{ else }}are{{ end }} backed by an emptyDir. That content is EPHEMERAL and will be lost when pods restart.
-         Enable persistence.enabled / persistence.config.enabled / persistence.raft.enabled (the defaults),
-         or back the volume yourself through volumeClaimTemplates or volumes, for any non-ephemeral deployment.
+         Enable persistence.enabled / persistence.config.enabled / persistence.raft.enabled (the defaults)
+         and persistence.backups.enabled, or back the volume yourself through volumeClaimTemplates or volumes,
+         for any non-ephemeral deployment.
+{{- end }}
+{{- if and (include "arcadedb.ha.enabled" .) (not (include "arcadedb.readinessRequiresHA" .)) }}
+
+WARNING: observability.health.readinessRequiresHA is false on an HA cluster. /api/v1/ready reports Ready
+         before a node has joined the Raft group and caught up, so a rolling restart can move on to the next
+         pod while the previous one is still syncing and drop the write quorum. A persisted config directory
+         (persistence.config) relies on it. Leave it unset (null) to follow HA.
 {{- end }}
 {{- if .Values.securityContext.readOnlyRootFilesystem }}
 
 NOTE: The container root filesystem is read-only by default (securityContext.readOnlyRootFilesystem=true).
-      ArcadeDB's database, config, logs, Raft storage, and /tmp are backed by writable mounts automatically.
+      ArcadeDB's database, config, backups, logs, Raft storage, and /tmp are backed by writable mounts automatically.
       If you add sidecars/init containers or custom paths that write to the root filesystem, either mount a
       writable volume for them or set securityContext.readOnlyRootFilesystem=false.
 {{- end }}

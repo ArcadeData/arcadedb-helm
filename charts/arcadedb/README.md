@@ -49,6 +49,7 @@ The command removes all the Kubernetes components associated with the chart and 
 |----------------------------------------|--------------------------------------------------------------------|------------------------------------------|
 | `arcadedb.configDirectory`             | Config storage directory inside the container                     | `/home/arcadedb/config`                  |
 | `arcadedb.backupConfigMap`             | Name of the config map containing a [backup.json](https://docs.arcadedb.com/arcadedb/how-to/operations/auto-backup#configuration-file) configuration        |                                    |
+| `arcadedb.backupDirectory`             | Directory backups are written to, passed as `-Darcadedb.server.backupDirectory` and mounted on a writable volume (see [Backups](#backups)). `""` = server default, nothing mounted | `/home/arcadedb/backups` |
 | `arcadedb.mcpConfigMap`                | Name of the config map containing a [mcp-config.json](https://docs.arcadedb.com/arcadedb/reference/mcp/mcp#configuration) configuration        |                                    |
 | `arcadedb.databaseDirectory`           | Database storage directory inside the container                   | `/home/arcadedb/databases`               |
 | `arcadedb.defaultDatabases`            | Databases to create at startup. Empty = none.                     | `""`                                     |
@@ -345,6 +346,10 @@ Each enabled directory gets a generated per-replica `volumeClaimTemplates` entry
 | `persistence.raft.size`        | PVC size for the Raft directory.                                                                 | `1Gi`           |
 | `persistence.raft.accessMode`  | PVC access mode for the Raft directory.                                                          | `ReadWriteOnce` |
 | `persistence.raft.storageClass` | StorageClass name for the Raft PVC. Empty uses the cluster default.                             | `""`            |
+| `persistence.backups.enabled`  | Persist `arcadedb.backupDirectory` with a separate PVC. Off: a `backups` subPath of the `arcadedb-tmp` emptyDir. | `false` |
+| `persistence.backups.size`     | PVC size for the backups.                                                                        | `8Gi`           |
+| `persistence.backups.accessMode` | PVC access mode for the backups.                                                               | `ReadWriteOnce` |
+| `persistence.backups.storageClass` | StorageClass name for the backups PVC. Empty uses the cluster default.                       | `""`            |
 
 ### networkPolicy
 
@@ -418,7 +423,7 @@ Opt-in, behavior-preserving observability (ArcadeDB 26.7.1+). Every knob below d
 
 | Name                                       | Description                                                                                                  | Value   |
 |--------------------------------------------|--------------------------------------------------------------------------------------------------------------|---------|
-| `observability.health.readinessRequiresHA` | /api/v1/ready waits for Raft join on HA clusters                                                            | `false` |
+| `observability.health.readinessRequiresHA` | /api/v1/ready waits for Raft join and catch-up. `null` = on whenever HA is active; an explicit `true`/`false` wins | `null` |
 | `observability.health.readinessHAMaxLag`   | Max Raft log entries a follower may lag behind commit index and still report Ready (requires readinessRequiresHA) | `100` |
 
 Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. For example:
@@ -445,6 +450,8 @@ The chart ships five reserved volumes, mounted (through `volumeMounts`) at the d
 | `arcadedb-logs`   | `/home/arcadedb/log`       | Server logs                    | `emptyDir`                                    |
 | `arcadedb-tmp`    | `/tmp`                     | Scratch space                  | `emptyDir`                                    |
 
+`arcadedb.backupDirectory` (`/home/arcadedb/backups`) gets its own mount too, described under [Backups](#backups).
+
 For each enabled `persistence.*` directory the chart generates a per-replica `volumeClaimTemplates` entry of the same
 name, which the StatefulSet mounts in place of a pod volume. Setting a flag to `false` backs that directory with an
 `emptyDir` instead, and `NOTES.txt` warns that its content is lost when a Pod restarts. Raft storage is only used while
@@ -464,13 +471,29 @@ persistence:
 volumeClaimTemplates:
   # extra per-replica claim under your own name, with a matching volumeMounts entry
   - metadata:
-      name: arcadedb-backups
+      name: arcadedb-replication
     spec:
       accessModes: [ReadWriteOnce]
       resources:
         requests:
           storage: 20Gi
 ```
+
+### Backups
+
+The server writes backups (scheduled through `arcadedb.backupConfigMap`, or taken with `BACKUP DATABASE`) to
+`arcadedb.backupDirectory`, which the chart passes as `-Darcadedb.server.backupDirectory` and mounts on a writable
+volume, since the root filesystem is read-only:
+
+- by default, a `backups` subPath of the `arcadedb-tmp` `emptyDir`: writable, but lost with the Pod. `NOTES.txt` warns
+  when `arcadedb.backupConfigMap` schedules backups there;
+- with `persistence.backups.enabled=true`, a generated per-replica `arcadedb-backups` PVC;
+- a `volumeClaimTemplates` or `volumes` entry named `arcadedb-backups` is mounted there instead of either;
+- a `volumeMounts` entry that already covers the directory (for example a shared NFS volume) wins, and the chart mounts
+  nothing.
+
+The directory must be outside `arcadedb.databaseDirectory`, where the server would open it as a database; rendering
+fails otherwise. Backups on a PVC still live in the same cluster and storage as the data: copy them elsewhere for disaster recovery.
 
 ### Upgrading from 26.10.2 or earlier
 
