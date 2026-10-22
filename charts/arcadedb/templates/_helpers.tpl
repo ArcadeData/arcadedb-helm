@@ -603,11 +603,11 @@ alias) is treated as older.
 
 {{/*
 Returns "true" when the root password is passed as a mounted file
-(-Darcadedb.server.rootPasswordPath) instead of on the command line, where it
-is readable through /proc/<pid>/cmdline. Before 26.11.1 an HA node derives its
-cluster token from the inline arcadedb.server.rootPassword only, so in HA the
+(-Darcadedb.server.rootPasswordPath). Before 26.11.1 an HA node derives its
+cluster token from the arcadedb.server.rootPassword setting only, so in HA the
 file is used only when an explicit token is mounted or the image derives the
-token from the file.
+token from the file. Otherwise the setting is exported as an env var named
+after its key (#45), not as a -D flag readable through /proc/<pid>/cmdline.
 */}}
 {{- define "arcadedb.credentials.rootPasswordFromFile" -}}
 {{- if or (not (include "arcadedb.ha.enabled" .)) (include "arcadedb.credentials.mountClusterToken" .) (include "arcadedb.image.derivesTokenFromPasswordFile" .) -}}true{{- end -}}
