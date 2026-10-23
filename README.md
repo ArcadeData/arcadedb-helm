@@ -84,6 +84,7 @@ make test-unit         # helm-unittest suites (auto-installs the plugin)
 make test-config-keys  # rendered -Darcadedb.* keys exist in the server image (requires Docker)
 make test-integration  # kind-based end-to-end tests (requires Docker)
 make test-integration-gremlin  # Gremlin on a non-default port, on a release installed for it (see below)
+make test-integration-gremlin-external  # the same, with the port set by your own gremlin-server.yaml (see below)
 make test              # run all of the above
 ```
 
@@ -131,6 +132,19 @@ the same checks run again. The latest-image guard runs it too, as
 `integration-latest-gremlin-port`. That script upgrades the release, so it is not part of
 `make test`; to run it locally, install with those three values and
 `replicaCount=1` first.
+
+`integration-gremlin-port-external` covers the other route,
+`arcadedb.plugins.gremlin.portManagedExternally`: a single node installed with the
+Gremlin plugin on 8185 and that flag, then `make test-integration-gremlin-external`
+(`ci/integration-test-gremlin-external.sh`). The plugin first stays on 8182, since
+the chart's port does not move it. The suite then writes a `gremlin-server.yaml`
+with `port: 8185` on the config volume and restarts the pod: config-seed logs
+`keeping existing gremlin-server.yaml` and sets no port, the file is unchanged, the
+plugin listens on 8185 and a pod reaches it through the Service. A `helm upgrade`
+then mounts a `gremlin-server.yaml` with `port: 8186` from a ConfigMap on that
+path, and the same checks run on 8186. The latest-image guard runs it as
+`integration-latest-gremlin-port-external`. It restarts and upgrades the release,
+so it is not part of `make test` either.
 
 ### Release-bump checklist
 
