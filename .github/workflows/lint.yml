@@ -90,3 +90,13 @@ jobs:
     uses: ./.github/workflows/integration-reusable.yml
     with:
       replicaCount: 1
+
+  # Gremlin on a non-default port (issue #62): config-seed writes port: 8183 into
+  # gremlin-server.yaml (arcadedb.plugins.gremlin.writePortToConfig, #58), the
+  # plugin binds it and the Service reaches it; helm upgrade then moves it to 8184.
+  # A single node, so the Gremlin plugin stays out of the HA runs above.
+  integration-gremlin-port:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      replicaCount: 1
+      gremlinPort: 8183

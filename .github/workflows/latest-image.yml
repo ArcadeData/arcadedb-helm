@@ -38,6 +38,17 @@ jobs:
       rootPasswordSecret: arcadedb-root-password
       rootPasswordFrom: file
 
+  # Gremlin on a non-default port through writePortToConfig (issue #62): the
+  # plugin reads its port only from gremlin-server.yaml, a server-side behaviour
+  # the upcoming release could change.
+  integration-latest-gremlin-port:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      imageTag: latest
+      pullPolicy: Always
+      replicaCount: 1
+      gremlinPort: 8183
+
   config-keys-latest:
     runs-on: ubuntu-24.04
     steps:
