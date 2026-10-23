@@ -134,6 +134,8 @@ kubectl rollout status statefulset/"$RELEASE" -n "$NAMESPACE" --timeout="${ROLLO
 PROBE_IMAGE=$(kubectl get statefulset -n "$NAMESPACE" "$RELEASE" -o json | jq -r \
   '.spec.template.spec.initContainers[]? | select(.name=="config-seed") | .image')
 [[ -n "$PROBE_IMAGE" ]] || { echo "ERROR: the StatefulSet has no config-seed init container"; exit 1; }
+# A probe left by an earlier run may still be terminating: wait it out.
+kubectl delete pod -n "$NAMESPACE" "$PROBE" --ignore-not-found --wait=true >/dev/null
 kubectl run -n "$NAMESPACE" "$PROBE" --image="$PROBE_IMAGE" --restart=Never \
   --image-pull-policy=IfNotPresent --command -- sleep 1800 >/dev/null
 kubectl wait -n "$NAMESPACE" --for=condition=Ready "pod/${PROBE}" --timeout="${ROLLOUT_TIMEOUT}s" >/dev/null
