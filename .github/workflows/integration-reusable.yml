@@ -44,12 +44,22 @@ on:
         default: 3
       gremlinPort:
         description: >-
-          0 = Gremlin off. Otherwise install with the Gremlin plugin on this port
-          through arcadedb.plugins.gremlin.writePortToConfig (issue #62) and, after
-          the main suite, run make test-integration-gremlin, which moves it to
-          gremlinPort + 1 with helm upgrade. Needs replicaCount 1 and the jvm flavor.
+          0 = Gremlin off. Otherwise install with the Gremlin plugin on this port,
+          by the route gremlinPortRoute names, and run that route's suite after the
+          main one. Needs replicaCount 1 and the jvm flavor.
         type: number
         default: 0
+      gremlinPortRoute:
+        description: >-
+          How gremlinPort reaches the plugin. write = the chart writes it into
+          gremlin-server.yaml (arcadedb.plugins.gremlin.writePortToConfig, issue
+          #62); make test-integration-gremlin then moves it to gremlinPort + 1 with
+          helm upgrade. external = the user's own gremlin-server.yaml sets it
+          (arcadedb.plugins.gremlin.portManagedExternally, issue #66); make
+          test-integration-gremlin-external writes that file on the config volume,
+          restarts the pod, then mounts one from a ConfigMap on gremlinPort + 1.
+        type: string
+        default: "write"
 
 permissions:
   contents: read
@@ -114,6 +124,7 @@ jobs:
         env:
           SECRET_NAME: ${{ inputs.rootPasswordSecret }}
           TOKEN_SECRET_NAME: ${{ inputs.clusterTokenSecret }}
+          GREMLIN_PORT_ROUTE: ${{ inputs.gremlinPortRoute }}
         run: |
           CREDENTIALS_ARGS=()
           if [[ -n "$SECRET_NAME" ]]; then
@@ -132,10 +143,15 @@ jobs:
           fi
           GREMLIN_ARGS=()
           if [[ "${{ inputs.gremlinPort }}" != "0" ]]; then
+            case "$GREMLIN_PORT_ROUTE" in
+              write)    GREMLIN_ROUTE_KEY=writePortToConfig ;;
+              external) GREMLIN_ROUTE_KEY=portManagedExternally ;;
+              *) echo "gremlinPortRoute must be write or external (got '${GREMLIN_PORT_ROUTE}')"; exit 1 ;;
+            esac
             GREMLIN_ARGS+=(
               --set arcadedb.plugins.gremlin.enabled=true
               --set arcadedb.plugins.gremlin.port=${{ inputs.gremlinPort }}
-              --set arcadedb.plugins.gremlin.writePortToConfig=true
+              --set "arcadedb.plugins.gremlin.${GREMLIN_ROUTE_KEY}=true"
             )
           fi
           helm install test-arcadedb charts/arcadedb/ \
@@ -161,10 +177,16 @@ jobs:
         run: make test-integration
 
       - name: Run Gremlin port tests
-        if: inputs.gremlinPort != 0
+        if: inputs.gremlinPort != 0 && inputs.gremlinPortRoute == 'write'
         env:
           GREMLIN_PORT: ${{ inputs.gremlinPort }}
         run: make test-integration-gremlin
+
+      - name: Run externally managed Gremlin port tests
+        if: inputs.gremlinPort != 0 && inputs.gremlinPortRoute == 'external'
+        env:
+          GREMLIN_PORT: ${{ inputs.gremlinPort }}
+        run: make test-integration-gremlin-external
 
       - name: Delete kind cluster
         if: always()

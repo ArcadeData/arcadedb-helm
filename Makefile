@@ -2,7 +2,7 @@ HELM ?= helm
 CHART_DIR := charts/arcadedb
 HELM_UNITTEST_VERSION := 0.5.2
 
-.PHONY: help lint test-unit test-config-seed test-config-keys test-integration test-integration-gremlin test plugin-install
+.PHONY: help lint test-unit test-config-seed test-config-keys test-integration test-integration-gremlin test-integration-gremlin-external test plugin-install
 
 help:
 	@echo "Targets:"
@@ -13,6 +13,8 @@ help:
 	@echo "  make test-integration  Run kind-based integration tests"
 	@echo "  make test-integration-gremlin  Gremlin on a non-default port via writePortToConfig"
 	@echo "                         (needs a single-node release installed with it; see the script)"
+	@echo "  make test-integration-gremlin-external  Gremlin on a port set by your own gremlin-server.yaml"
+	@echo "                         (portManagedExternally; needs a single-node release installed with it)"
 	@echo "  make test              All of the above"
 	@echo "  make plugin-install    (Re)install helm-unittest plugin at pinned version"
 
@@ -44,5 +46,11 @@ test-integration:
 # a non-default port (see ci/integration-test-gremlin.sh), and it upgrades it.
 test-integration-gremlin:
 	bash ci/integration-test-gremlin.sh
+
+# Not part of `make test` either: it needs a release installed with
+# portManagedExternally (see ci/integration-test-gremlin-external.sh), and it
+# restarts and upgrades it.
+test-integration-gremlin-external:
+	bash ci/integration-test-gremlin-external.sh
 
 test: lint test-unit test-config-seed test-config-keys test-integration

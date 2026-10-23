@@ -49,6 +49,17 @@ jobs:
       replicaCount: 1
       gremlinPort: 8183
 
+  # The same through the user's own gremlin-server.yaml (portManagedExternally,
+  # issue #66).
+  integration-latest-gremlin-port-external:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      imageTag: latest
+      pullPolicy: Always
+      replicaCount: 1
+      gremlinPort: 8185
+      gremlinPortRoute: external
+
   config-keys-latest:
     runs-on: ubuntu-24.04
     steps:

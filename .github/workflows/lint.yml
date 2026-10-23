@@ -100,3 +100,15 @@ jobs:
     with:
       replicaCount: 1
       gremlinPort: 8183
+
+  # Gremlin on a port set by the user's own gremlin-server.yaml (issue #66):
+  # arcadedb.plugins.gremlin.portManagedExternally (#52) with port 8185. The suite
+  # writes that file on the config volume and restarts the pod (config-seed keeps
+  # it, the plugin binds 8185, the Service reaches it), then mounts one from a
+  # ConfigMap with helm upgrade and checks the same on 8186.
+  integration-gremlin-port-external:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      replicaCount: 1
+      gremlinPort: 8185
+      gremlinPortRoute: external
