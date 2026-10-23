@@ -94,7 +94,7 @@ tests:
       observability.metrics.prometheus.serviceMonitor.enabled: true
     asserts:
       - failedTemplate:
-          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+          errorMessage: "observability.metrics.prometheus serviceMonitor/podAnnotations require arcadedb.plugins.prometheus.enabled=true (the /prometheus endpoint must be served)"
 
   - it: fails when basicAuth enabled without a secretName
     set:
@@ -103,4 +103,4 @@ tests:
       observability.metrics.prometheus.serviceMonitor.basicAuth.enabled: true
     asserts:
       - failedTemplate:
-          errorPattern: "requires basicAuth.secretName"
+          errorMessage: "serviceMonitor.basicAuth.enabled requires basicAuth.secretName (a secret with username + password keys)"

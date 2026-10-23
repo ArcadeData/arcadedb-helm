@@ -219,14 +219,14 @@ tests:
       arcadedb.backupDirectory: /home/arcadedb/databases/backups
     asserts:
       - failedTemplate:
-          errorPattern: "arcadedb.backupDirectory \\(/home/arcadedb/databases/backups\\) must be outside arcadedb.databaseDirectory"
+          errorMessage: "arcadedb.backupDirectory (/home/arcadedb/databases/backups) must be outside arcadedb.databaseDirectory (/home/arcadedb/databases): the server opens every directory there as a database"
 
   - it: fails when the backup directory is the database directory
     set:
       arcadedb.backupDirectory: /home/arcadedb/databases/
     asserts:
       - failedTemplate:
-          errorPattern: "must be outside arcadedb.databaseDirectory"
+          errorMessage: "arcadedb.backupDirectory (/home/arcadedb/databases/) must be outside arcadedb.databaseDirectory (/home/arcadedb/databases): the server opens every directory there as a database"
 
   - it: a sibling path sharing the database directory prefix is accepted
     set:

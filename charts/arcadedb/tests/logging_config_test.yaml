@@ -178,7 +178,7 @@ tests:
       arcadedb.logging.mountPath: /home/arcadedb/config
     asserts:
       - failedTemplate:
-          errorPattern: arcadedb.logging.mountPath .* must be outside arcadedb.configDirectory
+          errorMessage: "arcadedb.logging.mountPath (/home/arcadedb/config) must be outside arcadedb.configDirectory (/home/arcadedb/config): mounting the logging ConfigMap on, inside or above the config directory would hide it or the config volume"
 
   - it: fails when the logging mountPath is inside the config directory
     template: statefulset.yaml
@@ -186,7 +186,7 @@ tests:
       arcadedb.logging.mountPath: /home/arcadedb/config/logging
     asserts:
       - failedTemplate:
-          errorPattern: arcadedb.logging.mountPath .* must be outside arcadedb.configDirectory
+          errorMessage: "arcadedb.logging.mountPath (/home/arcadedb/config/logging) must be outside arcadedb.configDirectory (/home/arcadedb/config): mounting the logging ConfigMap on, inside or above the config directory would hide it or the config volume"
 
   - it: fails when the logging mountPath is a parent of the config directory
     template: statefulset.yaml
@@ -194,7 +194,7 @@ tests:
       arcadedb.logging.mountPath: /home/arcadedb
     asserts:
       - failedTemplate:
-          errorPattern: arcadedb.logging.mountPath .* must be outside arcadedb.configDirectory
+          errorMessage: "arcadedb.logging.mountPath (/home/arcadedb) must be outside arcadedb.configDirectory (/home/arcadedb/config): mounting the logging ConfigMap on, inside or above the config directory would hide it or the config volume"
 
   - it: a sibling directory that only shares a name prefix is accepted
     template: statefulset.yaml

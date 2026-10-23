@@ -1,0 +1,32 @@
+# Negative control for the failedTemplate assertion (#59). Run by
+# ci/check-failed-template.sh, not by `helm unittest` on its own: the file name does
+# not end in _test.yaml, so the default suite glob skips it.
+#
+# EVERY test here must FAIL. A test that passes means the pinned helm-unittest no
+# longer compares errorMessage with the render error, and every failedTemplate
+# assertion in tests/ then passes on any failure, whatever the message.
+suite: failedTemplate negative control (#59)
+templates:
+  - statefulset.yaml
+release:
+  name: test
+  namespace: default
+tests:
+  - it: a message the render never produces must fail
+    set:
+      arcadedb.backupDirectory: /home/arcadedb/databases/
+    asserts:
+      - failedTemplate:
+          errorMessage: "QQQ never in any message"
+
+  - it: a prefix of the real message must fail (errorMessage is an exact match)
+    set:
+      arcadedb.backupDirectory: /home/arcadedb/databases/
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.backupDirectory (/home/arcadedb/databases/) must be outside arcadedb.databaseDirectory"
+
+  - it: a render that succeeds must fail the assertion
+    asserts:
+      - failedTemplate:
+          errorMessage: "arcadedb.backupDirectory (/home/arcadedb/databases/) must be outside arcadedb.databaseDirectory (/home/arcadedb/databases): the server opens every directory there as a database"

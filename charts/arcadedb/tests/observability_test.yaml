@@ -232,14 +232,14 @@ tests:
       observability.metrics.prometheus.podAnnotations.enabled: true
     asserts:
       - failedTemplate:
-          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+          errorMessage: "observability.metrics.prometheus serviceMonitor/podAnnotations require arcadedb.plugins.prometheus.enabled=true (the /prometheus endpoint must be served)"
 
   - it: fails when serviceMonitor enabled without the prometheus plugin
     set:
       observability.metrics.prometheus.serviceMonitor.enabled: true
     asserts:
       - failedTemplate:
-          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+          errorMessage: "observability.metrics.prometheus serviceMonitor/podAnnotations require arcadedb.plugins.prometheus.enabled=true (the /prometheus endpoint must be served)"
 
   - it: a null plugins map fails with the prometheus guard message, not a nil pointer (#32)
     values:
@@ -248,7 +248,7 @@ tests:
       observability.metrics.prometheus.serviceMonitor.enabled: true
     asserts:
       - failedTemplate:
-          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+          errorMessage: "observability.metrics.prometheus serviceMonitor/podAnnotations require arcadedb.plugins.prometheus.enabled=true (the /prometheus endpoint must be served)"
 
   - it: a null prometheus entry fails with the prometheus guard message (#32)
     set:
@@ -256,4 +256,4 @@ tests:
       observability.metrics.prometheus.serviceMonitor.enabled: true
     asserts:
       - failedTemplate:
-          errorPattern: "require arcadedb.plugins.prometheus.enabled=true"
+          errorMessage: "observability.metrics.prometheus serviceMonitor/podAnnotations require arcadedb.plugins.prometheus.enabled=true (the /prometheus endpoint must be served)"
