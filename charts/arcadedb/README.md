@@ -100,7 +100,8 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `arcadedb.plugins.bolt.enabled`           | Enable Bolt protocol support                            | not set               |
 | `arcadedb.plugins.bolt.port`              | Bolt protocol port                                      | `7687` when enabled   |
 | `arcadedb.plugins.gremlin.enabled`        | Enable Gremlin protocol support                         | not set               |
-| `arcadedb.plugins.gremlin.port`           | Gremlin protocol port; only `8182` is accepted (see below) | `8182` when enabled  |
+| `arcadedb.plugins.gremlin.port`           | Gremlin protocol port; only `8182` unless `writePortToConfig` or `portManagedExternally` is set (see below) | `8182` when enabled  |
+| `arcadedb.plugins.gremlin.writePortToConfig` | Have `config-seed` write `port` into `gremlin-server.yaml` on every start (see below) | `false` |
 | `arcadedb.plugins.gremlin.portManagedExternally` | Accept a `port` other than `8182` because your own `gremlin-server.yaml` sets it (see below) | `false` |
 | `arcadedb.plugins.postgres.enabled`       | Enable PostgreSQL protocol support                      | not set               |
 | `arcadedb.plugins.postgres.port`          | PostgreSQL protocol port                                | `5432` when enabled  |
@@ -115,14 +116,34 @@ Enable plugins by adding a plugin entry under `arcadedb.plugins`.
 | `arcadedb.plugins.<custom>.class`         | Custom plugin implementation class                     | required              |
 
 The Gremlin plugin takes its port from `gremlin-server.yaml` (the image's sets none, so TinkerPop's default
-`8182`), not from a `-D` setting, so the chart cannot move it. `arcadedb.plugins.gremlin.port` only sets the port
-the Services and the NetworkPolicy expose, and any value other than `8182` fails the render instead of pointing
-them at a port nothing listens on.
+`8182`), not from a `-D` setting, so the chart cannot pass it on the command line. By default
+`arcadedb.plugins.gremlin.port` only sets the port the Services and the NetworkPolicy expose, and any value other
+than `8182` fails the render instead of pointing them at a port nothing listens on.
 
-To run Gremlin on another port, set `port:` in the `gremlin-server.yaml` on the config volume (the `config-seed`
-init container copies the image's file there only when it is absent, so an edited file is kept), then set
-`arcadedb.plugins.gremlin.port` to the same value and `arcadedb.plugins.gremlin.portManagedExternally: true`.
-The chart then exposes that port without checking it; keeping the two in step is up to you:
+To run Gremlin on another port, set `arcadedb.plugins.gremlin.writePortToConfig: true` with the port you want:
+
+```yaml
+arcadedb:
+  plugins:
+    gremlin:
+      enabled: true
+      port: 8183
+      writePortToConfig: true
+```
+
+The `config-seed` init container then sets the top-level `port:` key of `gremlin-server.yaml` on the config volume
+to that value on every pod start (adding the key when the file has none), and leaves every other line as it is. The
+server, the Services and the NetworkPolicy all follow the one value, and a later `helm upgrade` that changes it
+restarts the pods with the new port. It is opt-in because it edits a file `config-seed` otherwise never touches once it
+exists. It needs `initContainers.configSeed.enabled` and a volume holding `arcadedb.configDirectory` (both the
+default), and it fails the render when `gremlin-server.yaml` is mounted on its own from another volume (for example
+a ConfigMap `subPath`), since the server would read that file instead. Turning it off later leaves the last `port:`
+written in the file: set `port` back to `8182` there, or keep the value with `portManagedExternally` below.
+
+If you manage `gremlin-server.yaml` yourself instead, set `port:` in it (the `config-seed` init container copies the
+image's file there only when it is absent, so an edited file is kept), then set `arcadedb.plugins.gremlin.port` to
+the same value and `arcadedb.plugins.gremlin.portManagedExternally: true`. The chart then exposes that port without
+checking it; keeping the two in step is up to you:
 
 ```yaml
 arcadedb:
@@ -569,7 +590,8 @@ The chart adds a `config-seed` init container that runs the server image itself 
 tag, so the defaults match the server version), mounts the volume holding the config directory at
 `/config-seed` so the image's own `config/` stays visible, and copies each of those files that the config
 directory does not hold yet. A file that already exists is never overwritten, so changes made at runtime or by
-hand survive restarts. The logging files are not seeded: the chart ships
+hand survive restarts. The one exception is opt-in: with `arcadedb.plugins.gremlin.writePortToConfig` it sets the
+top-level `port:` of `gremlin-server.yaml` on every start (see [arcadedb.plugins](#arcadedbplugins)). The logging files are not seeded: the chart ships
 `arcadedb-log.properties` from a ConfigMap (see `arcadedb.logging`). The container uses `securityContext`, so
 it runs as the ArcadeDB user, and it runs after `config-chown` when that one is enabled.
 

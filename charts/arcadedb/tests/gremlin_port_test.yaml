@@ -68,7 +68,7 @@ tests:
       arcadedb.plugins.gremlin.port: 9999
     asserts:
       - failedTemplate:
-          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182."
+          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182, or set arcadedb.plugins.gremlin.writePortToConfig: true to have the chart write it into gremlin-server.yaml (#58)."
 
   - it: refuses a port other than 8182 with the NetworkPolicy and external Service enabled
     template: statefulset.yaml
@@ -79,7 +79,7 @@ tests:
       arcadedb.plugins.gremlin.port: 9999
     asserts:
       - failedTemplate:
-          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182."
+          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182, or set arcadedb.plugins.gremlin.writePortToConfig: true to have the chart write it into gremlin-server.yaml (#58)."
 
   - it: a port given as a string is compared by value
     template: statefulset.yaml
@@ -88,7 +88,7 @@ tests:
       arcadedb.plugins.gremlin.port: "7777"
     asserts:
       - failedTemplate:
-          errorMessage: "arcadedb.plugins.gremlin.port is 7777, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182."
+          errorMessage: "arcadedb.plugins.gremlin.port is 7777, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182, or set arcadedb.plugins.gremlin.writePortToConfig: true to have the chart write it into gremlin-server.yaml (#58)."
 
   - it: a disabled gremlin entry with another port renders
     template: statefulset.yaml

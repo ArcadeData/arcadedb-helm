@@ -38,6 +38,9 @@ jobs:
       - name: helm unittest
         run: make test-unit
 
+      - name: config-seed script against sample files
+        run: make test-config-seed
+
   config-keys:
     runs-on: ubuntu-24.04
     steps:

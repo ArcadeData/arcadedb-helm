@@ -170,13 +170,22 @@ parameters, service and networkPolicy helpers build on this output.
         gremlin-server.yaml on the config volume sets that port (#52): the value is
         then only what the Services and the NetworkPolicy expose, and the chart
         still passes no port to the server.
+        writePortToConfig: true has config-seed set port: in gremlin-server.yaml
+        on every start (#58), so the chart moves the port itself; the two
+        settings are alternatives and may not be combined.
         */}}
-        {{- if eq (toString $config.portManagedExternally) "true" }}
+        {{- $external := eq (toString $config.portManagedExternally) "true" }}
+        {{- $writePort := eq (toString $config.writePortToConfig) "true" }}
+        {{- if and $external $writePort }}
+          {{- fail "arcadedb.plugins.gremlin.portManagedExternally and arcadedb.plugins.gremlin.writePortToConfig are both true: either your own gremlin-server.yaml sets the port, or the chart writes it there. Set only one." -}}
+        {{- end }}
+        {{- if or $external $writePort }}
           {{- if or (lt (int $port) 1) (gt (int $port) 65535) }}
             {{- fail (printf "arcadedb.plugins.gremlin.port is %v, which is not a TCP port (1-65535)." $port) -}}
           {{- end }}
+          {{- if $writePort }}{{- $_ := include "arcadedb.gremlin.configPort" $ }}{{- end }}
         {{- else if ne (int $port) 8182 }}
-          {{- fail (printf "arcadedb.plugins.gremlin.port is %v, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182." $port) -}}
+          {{- fail (printf "arcadedb.plugins.gremlin.port is %v, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182, or set arcadedb.plugins.gremlin.writePortToConfig: true to have the chart write it into gremlin-server.yaml (#58)." $port) -}}
         {{- end }}
       {{- else if eq $plugin "postgres" }}
         {{- $port = default 5432 $config.port }}
@@ -718,6 +727,35 @@ the chart ships arcadedb-log.properties from a ConfigMap (#38).
 {{- end -}}
 
 {{/*
+The Gremlin port config-seed writes into gremlin-server.yaml (#58), or nothing.
+Set when arcadedb.plugins.gremlin is enabled with writePortToConfig: true: the
+plugin reads its port only from that file, so config-seed sets its top-level
+port: key on every start. Fails when config-seed cannot reach the file the
+server reads: config-seed disabled, no volumeMounts entry holding
+configDirectory, or a volumeMounts entry mounted on gremlin-server.yaml itself
+(config-seed would edit the copy under it, which the server never sees).
+*/}}
+{{- define "arcadedb.gremlin.configPort" -}}
+{{- $config := (.Values.arcadedb.plugins | default dict).gremlin | default dict -}}
+{{- if and $config.enabled (eq (toString $config.writePortToConfig) "true") -}}
+{{- $seed := (.Values.initContainers | default dict).configSeed | default dict -}}
+{{- if not (or (not (hasKey $seed "enabled")) $seed.enabled) -}}
+{{- fail "arcadedb.plugins.gremlin.writePortToConfig needs the config-seed init container, which writes the port into gremlin-server.yaml: set initContainers.configSeed.enabled=true, or set the port in your own gremlin-server.yaml with arcadedb.plugins.gremlin.portManagedExternally: true." -}}
+{{- end -}}
+{{- if not (include "arcadedb.configSeed.mount" . | fromJson) -}}
+{{- fail (printf "arcadedb.plugins.gremlin.writePortToConfig needs a volumeMounts entry that holds arcadedb.configDirectory (%s): without one, the gremlin-server.yaml config-seed writes would not outlive the init container." .Values.arcadedb.configDirectory) -}}
+{{- end -}}
+{{- $file := printf "%s/gremlin-server.yaml" (trimSuffix "/" .Values.arcadedb.configDirectory) -}}
+{{- range .Values.volumeMounts -}}
+{{- if eq (trimSuffix "/" (toString .mountPath)) $file -}}
+{{- fail (printf "arcadedb.plugins.gremlin.writePortToConfig cannot write the port: volumeMounts entry '%s' is mounted on %s, so the server reads that file, not the one config-seed edits. Set port: in it and use arcadedb.plugins.gremlin.portManagedExternally: true instead." .name $file) -}}
+{{- end -}}
+{{- end -}}
+{{- int (default 8182 $config.port) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The volumeMounts entry that holds arcadedb.configDirectory: the deepest mountPath
 that is the directory or one of its parents. Returns JSON {} when none does.
 */}}
@@ -762,7 +800,10 @@ The config-seed init container. It runs the image named by
 arcadedb.configSeed.image with the volume that holds configDirectory mounted at
 /config-seed instead of over the image's config/, and copies each file the
 directory does not hold yet. Existing files, including ones the server or an
-operator changed, are never overwritten.
+operator changed, are never overwritten; the one exception is the top-level
+port: of gremlin-server.yaml, set on every start when arcadedb.gremlin.configPort
+returns a port (#58). The script is files/config-seed.sh (ci/test-config-seed.sh
+runs it against sample files).
 Skipped when disabled, and when no volumeMounts entry holds configDirectory
 (nothing would outlive the init container).
 A values file without the key (helm upgrade --reuse-values) keeps it on.
@@ -786,20 +827,12 @@ A values file without the key (helm upgrade --reuse-values) keeps it on.
     - sh
     - -c
     - |
-      set -e
-      src="$1"; dst="$2"; shift 2
-      mkdir -p "$dst"
-      for f in "$@"; do
-        if [ -e "$dst/$f" ]; then
-          echo "config-seed: keeping existing $f"
-        elif [ -f "$src/$f" ]; then
-          cat "$src/$f" > "$dst/.$f.seed"
-          mv "$dst/.$f.seed" "$dst/$f"
-          echo "config-seed: seeded $f"
-        else
-          echo "config-seed: $f is not in the image, skipped"
-        fi
-      done
+{{ .Files.Get "files/config-seed.sh" | trim | indent 6 }}
+  {{- with include "arcadedb.gremlin.configPort" . }}
+  env:
+    - name: GREMLIN_PORT
+      value: {{ . | quote }}
+  {{- end }}
   args:
     - config-seed
     - {{ $source | quote }}

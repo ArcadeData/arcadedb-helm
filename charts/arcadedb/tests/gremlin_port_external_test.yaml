@@ -103,7 +103,7 @@ tests:
       arcadedb.plugins.gremlin.portManagedExternally: false
     asserts:
       - failedTemplate:
-          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182."
+          errorMessage: "arcadedb.plugins.gremlin.port is 9999, but the Gremlin plugin listens on 8182: it reads its port from gremlin-server.yaml and the server has no setting the chart can pass to change it (#47). Leave arcadedb.plugins.gremlin.port unset or set it to 8182, or set arcadedb.plugins.gremlin.writePortToConfig: true to have the chart write it into gremlin-server.yaml (#58)."
 
   - it: refuses a port that is not a valid TCP port even when managed externally
     template: statefulset.yaml
