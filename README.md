@@ -83,6 +83,7 @@ make lint              # helm lint
 make test-unit         # helm-unittest suites (auto-installs the plugin)
 make test-config-keys  # rendered -Darcadedb.* keys exist in the server image (requires Docker)
 make test-integration  # kind-based end-to-end tests (requires Docker)
+make test-integration-gremlin  # Gremlin on a non-default port, on a release installed for it (see below)
 make test              # run all of the above
 ```
 
@@ -120,6 +121,16 @@ can take to hand the root password and the HA cluster token to the server:
 The HA route with a user root password Secret, no token, and an image >= 26.11.1
 (password file only, token derived from it) runs in the latest-image guard as
 `integration-root-password-file-snapshot` until 26.11.1 is published.
+
+`integration-gremlin-port` installs a single node with the Gremlin plugin on 8183
+through `arcadedb.plugins.gremlin.writePortToConfig`, runs the main suite, then
+`make test-integration-gremlin` (`ci/integration-test-gremlin.sh`): config-seed
+logs the port it wrote, `gremlin-server.yaml` carries it, the plugin listens on it
+and a pod reaches it through the Service; `helm upgrade` then moves it to 8184 and
+the same checks run again. The latest-image guard runs it too, as
+`integration-latest-gremlin-port`. That script upgrades the release, so it is not part of
+`make test`; to run it locally, install with those three values and
+`replicaCount=1` first.
 
 ### Release-bump checklist
 

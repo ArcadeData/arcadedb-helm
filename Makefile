@@ -2,7 +2,7 @@ HELM ?= helm
 CHART_DIR := charts/arcadedb
 HELM_UNITTEST_VERSION := 0.5.2
 
-.PHONY: help lint test-unit test-config-seed test-config-keys test-integration test plugin-install
+.PHONY: help lint test-unit test-config-seed test-config-keys test-integration test-integration-gremlin test plugin-install
 
 help:
 	@echo "Targets:"
@@ -11,6 +11,8 @@ help:
 	@echo "  make test-config-seed  Run the config-seed init container script against sample files"
 	@echo "  make test-config-keys  Check rendered -Darcadedb.* keys against the server image (needs docker)"
 	@echo "  make test-integration  Run kind-based integration tests"
+	@echo "  make test-integration-gremlin  Gremlin on a non-default port via writePortToConfig"
+	@echo "                         (needs a single-node release installed with it; see the script)"
 	@echo "  make test              All of the above"
 	@echo "  make plugin-install    (Re)install helm-unittest plugin at pinned version"
 
@@ -37,5 +39,10 @@ test-config-keys:
 
 test-integration:
 	bash ci/integration-test.sh
+
+# Not part of `make test`: it needs a release installed with the Gremlin plugin on
+# a non-default port (see ci/integration-test-gremlin.sh), and it upgrades it.
+test-integration-gremlin:
+	bash ci/integration-test-gremlin.sh
 
 test: lint test-unit test-config-seed test-config-keys test-integration

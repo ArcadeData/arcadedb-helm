@@ -42,6 +42,14 @@ on:
           the suite then skips its Raft phases.
         type: number
         default: 3
+      gremlinPort:
+        description: >-
+          0 = Gremlin off. Otherwise install with the Gremlin plugin on this port
+          through arcadedb.plugins.gremlin.writePortToConfig (issue #62) and, after
+          the main suite, run make test-integration-gremlin, which moves it to
+          gremlinPort + 1 with helm upgrade. Needs replicaCount 1 and the jvm flavor.
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -122,6 +130,14 @@ jobs:
               --set-string arcadedb.credentials.clusterToken.secret.key=clusterToken
             )
           fi
+          GREMLIN_ARGS=()
+          if [[ "${{ inputs.gremlinPort }}" != "0" ]]; then
+            GREMLIN_ARGS+=(
+              --set arcadedb.plugins.gremlin.enabled=true
+              --set arcadedb.plugins.gremlin.port=${{ inputs.gremlinPort }}
+              --set arcadedb.plugins.gremlin.writePortToConfig=true
+            )
+          fi
           helm install test-arcadedb charts/arcadedb/ \
             --set replicaCount=${{ inputs.replicaCount }} \
             --set arcadedb.defaultDatabases="" \
@@ -129,6 +145,7 @@ jobs:
             --set image.pullPolicy="${{ inputs.pullPolicy }}" \
             --set image.flavor="${{ inputs.flavor }}" \
             "${CREDENTIALS_ARGS[@]}" \
+            "${GREMLIN_ARGS[@]}" \
             --timeout 5m \
             --wait
 
@@ -142,6 +159,12 @@ jobs:
           CLUSTER_TOKEN_KEY: ${{ inputs.clusterTokenSecret != '' && 'clusterToken' || '' }}
           REPLICAS: ${{ inputs.replicaCount }}
         run: make test-integration
+
+      - name: Run Gremlin port tests
+        if: inputs.gremlinPort != 0
+        env:
+          GREMLIN_PORT: ${{ inputs.gremlinPort }}
+        run: make test-integration-gremlin
 
       - name: Delete kind cluster
         if: always()
