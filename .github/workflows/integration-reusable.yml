@@ -28,6 +28,20 @@ on:
           (rootPasswordPath) or env (the pre-26.11.1 HA fallback, issue #45).
         type: string
         default: "file"
+      clusterTokenSecret:
+        description: >-
+          Name of an HA cluster token Secret to create and install with
+          (arcadedb.credentials.clusterToken.secret.name), key clusterToken.
+          Empty = none, or the generated key in arcadedb-credentials-secret
+          when rootPasswordSecret is empty too.
+        type: string
+        default: ""
+      replicaCount:
+        description: >-
+          replicaCount to install. 1 = a single node (no HA, no cluster token);
+          the suite then skips its Raft phases.
+        type: number
+        default: 3
 
 permissions:
   contents: read
@@ -80,21 +94,36 @@ jobs:
           kubectl create secret generic "$SECRET_NAME" \
             --from-literal=password="$(openssl rand -hex 16)"
 
+      - name: Create cluster token Secret
+        if: inputs.clusterTokenSecret != ''
+        env:
+          SECRET_NAME: ${{ inputs.clusterTokenSecret }}
+        run: |
+          kubectl create secret generic "$SECRET_NAME" \
+            --from-literal=clusterToken="$(openssl rand -hex 32)"
+
       - name: Install chart
         env:
           SECRET_NAME: ${{ inputs.rootPasswordSecret }}
+          TOKEN_SECRET_NAME: ${{ inputs.clusterTokenSecret }}
         run: |
           CREDENTIALS_ARGS=()
           if [[ -n "$SECRET_NAME" ]]; then
-            # No arcadedb.credentials.clusterToken: a user-supplied root password
-            # Secret makes the dedicated token opt-in.
-            CREDENTIALS_ARGS=(
+            # A user-supplied root password Secret makes the dedicated cluster
+            # token opt-in: it is mounted only when clusterTokenSecret is set.
+            CREDENTIALS_ARGS+=(
               --set-string arcadedb.credentials.rootPassword.secret.name="$SECRET_NAME"
               --set-string arcadedb.credentials.rootPassword.secret.key=password
             )
           fi
+          if [[ -n "$TOKEN_SECRET_NAME" ]]; then
+            CREDENTIALS_ARGS+=(
+              --set-string arcadedb.credentials.clusterToken.secret.name="$TOKEN_SECRET_NAME"
+              --set-string arcadedb.credentials.clusterToken.secret.key=clusterToken
+            )
+          fi
           helm install test-arcadedb charts/arcadedb/ \
-            --set replicaCount=3 \
+            --set replicaCount=${{ inputs.replicaCount }} \
             --set arcadedb.defaultDatabases="" \
             --set image.tag="${{ inputs.imageTag }}" \
             --set image.pullPolicy="${{ inputs.pullPolicy }}" \
@@ -109,6 +138,9 @@ jobs:
           ROOT_PASSWORD_SECRET: ${{ inputs.rootPasswordSecret }}
           ROOT_PASSWORD_KEY: ${{ inputs.rootPasswordSecret != '' && 'password' || '' }}
           ROOT_PASSWORD_FROM: ${{ inputs.rootPasswordFrom }}
+          CLUSTER_TOKEN_SECRET: ${{ inputs.clusterTokenSecret }}
+          CLUSTER_TOKEN_KEY: ${{ inputs.clusterTokenSecret != '' && 'clusterToken' || '' }}
+          REPLICAS: ${{ inputs.replicaCount }}
         run: make test-integration
 
       - name: Delete kind cluster

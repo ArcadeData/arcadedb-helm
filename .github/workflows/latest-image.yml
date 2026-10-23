@@ -24,6 +24,20 @@ jobs:
       pullPolicy: Always
       flavor: native
 
+  # HA with a user-supplied root password Secret and no cluster token on an image
+  # >= 26.11.1 (issue #56): those servers derive the cluster token from the
+  # password file (ArcadeData/arcadedb#10479), so the chart mounts rootPasswordPath
+  # only. `latest` carries no version the chart can compare, so the job names the
+  # 26.11.1 snapshot tag, which it does. Once 26.11.1 is released, pin this job to
+  # it in lint.yml next to integration-root-password-env.
+  integration-root-password-file-snapshot:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      imageTag: 26.11.1-SNAPSHOT
+      pullPolicy: Always
+      rootPasswordSecret: arcadedb-root-password
+      rootPasswordFrom: file
+
   config-keys-latest:
     runs-on: ubuntu-24.04
     steps:
