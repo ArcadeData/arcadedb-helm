@@ -74,6 +74,17 @@ jobs:
       rootPasswordSecret: arcadedb-root-password
       rootPasswordFrom: env
 
+  # HA with a user-supplied root password Secret and no cluster token on an image
+  # >= 26.11.1 (issue #56, #64): those servers derive the cluster token from the
+  # password file (ArcadeData/arcadedb#10479), so the chart mounts rootPasswordPath
+  # only. Pinned to the release because `latest` carries no comparable version.
+  integration-root-password-file:
+    uses: ./.github/workflows/integration-reusable.yml
+    with:
+      imageTag: "26.11.1"
+      rootPasswordSecret: arcadedb-root-password
+      rootPasswordFrom: file
+
   # HA with a user-supplied root password Secret and a separate cluster token
   # Secret (issue #56): an explicit token makes the chart mount both as files on
   # any image version, rootPasswordPath from one Secret and clusterTokenPath from
