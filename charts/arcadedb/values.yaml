@@ -48,7 +48,7 @@ arcadedb:
     mountPath: "/home/arcadedb/logging"
     ## @param arcadedb.logging.properties Content of arcadedb-log.properties
     ## (java.util.logging format). Defaults to the file packaged with ArcadeDB
-    ## 26.10.2. ${arcadedb.server.logsDirectory} resolves to arcadedb.logsDirectory.
+    ## 26.11.1. ${arcadedb.server.logsDirectory} resolves to arcadedb.logsDirectory.
     properties: |
       # Specify the handlers to create in the root logger
       # (all loggers are children of the root logger)

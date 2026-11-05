@@ -73,7 +73,7 @@ at `arcadedb.logging.mountPath` and passes `-Djava.util.logging.config.file` poi
 |-------------------------------|----------------------------------------------------------------------------------------------|----------------------------------------------|
 | `arcadedb.logging.enabled`    | Ship `arcadedb-log.properties` from a ConfigMap. `false` leaves logging to the image         | `true`                                       |
 | `arcadedb.logging.mountPath`  | Directory the ConfigMap is mounted at. Must be outside `arcadedb.configDirectory`            | `/home/arcadedb/logging`                     |
-| `arcadedb.logging.properties` | Content of `arcadedb-log.properties` (java.util.logging format)                              | the file packaged with ArcadeDB 26.10.2      |
+| `arcadedb.logging.properties` | Content of `arcadedb-log.properties` (java.util.logging format)                              | the file packaged with ArcadeDB 26.11.1      |
 
 `${arcadedb.server.logsDirectory}` in `java.util.logging.FileHandler.pattern` resolves to `arcadedb.logsDirectory`. An
 `-Djava.util.logging.config.file` in `arcadedb.extraCommands` still takes precedence, since it comes later on the

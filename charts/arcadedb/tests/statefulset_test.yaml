@@ -47,7 +47,7 @@ tests:
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].image"
-          value: arcadedata/arcadedb:26.10.2
+          value: arcadedata/arcadedb:26.11.1
 
   - it: image.tag override wins over AppVersion default
     set:
@@ -64,7 +64,7 @@ tests:
     asserts:
       - equal:
           path: "spec.template.spec.containers[0].image"
-          value: my-registry.example.com/arcadedb-fork:26.10.2
+          value: my-registry.example.com/arcadedb-fork:26.11.1
 
   - it: image.pullPolicy default is IfNotPresent and is overridable
     asserts:
@@ -1554,6 +1554,7 @@ tests:
 
   - it: HA with a user-supplied root password Secret and no token keeps the derived token and passes the password as an env var on pre-26.11.1 images
     set:
+      image.tag: "26.10.2"
       replicaCount: 3
       arcadedb.credentials.rootPassword.secret.name: my-secret
       arcadedb.credentials.rootPassword.secret.key: my-key
