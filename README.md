@@ -148,9 +148,13 @@ so it is not part of `make test` either.
 When a new ArcadeDB version is released:
 
 1. Bump `version` and `appVersion` in `charts/arcadedb/Chart.yaml`.
-2. Update the pinned image literal in `charts/arcadedb/tests/statefulset_test.yaml`
-   to the new version, or `helm-unittest` will fail (it cannot reference
-   `Chart.AppVersion` in an assertion).
+2. Update the pinned image literals to the new version, or `helm-unittest` will
+   fail (it cannot reference `Chart.AppVersion` in an assertion): the
+   `arcadedata/arcadedb:<version>` values in `tests/statefulset_test.yaml`,
+   `tests/native_test.yaml` and `tests/config_seed_test.yaml`. Tests that pin
+   `image.tag` to an older version on purpose stay as they are. Also bump the
+   "packaged with ArcadeDB" version in `values.yaml` and the chart README after
+   checking that the default `arcadedb-log.properties` did not change.
 3. If `appVersion` was bumped **ahead of** the matching image being published
    (so a feature can ship as soon as the image lands), the PR integration job —
    which installs with `image.tag=appVersion` — cannot pull the image and will

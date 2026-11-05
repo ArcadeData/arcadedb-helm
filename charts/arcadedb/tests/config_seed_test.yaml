@@ -21,7 +21,7 @@ tests:
           value: config-seed
       - equal:
           path: spec.template.spec.initContainers[0].image
-          value: arcadedata/arcadedb:26.10.2
+          value: arcadedata/arcadedb:26.11.1
       - equal:
           path: spec.template.spec.initContainers[0].imagePullPolicy
           value: IfNotPresent
@@ -134,10 +134,10 @@ tests:
           value: config-seed
       - equal:
           path: spec.template.spec.initContainers[0].image
-          value: arcadedata/arcadedb:26.10.2
+          value: arcadedata/arcadedb:26.11.1
       - equal:
           path: spec.template.spec.containers[0].image
-          value: arcadedata/arcadedb:26.10.2-native
+          value: arcadedata/arcadedb:26.11.1-native
       - equal:
           path: spec.template.spec.initContainers[0].command[0]
           value: sh
@@ -238,7 +238,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.initContainers[0].image
-          value: arcadedata/arcadedb:26.10.2
+          value: arcadedata/arcadedb:26.11.1
 
   - it: on the native image, seeds a relocated config directory below a parent mount
     set:

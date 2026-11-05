@@ -12,7 +12,7 @@ tests:
           value: bin/server.sh
       - equal:
           path: spec.template.spec.containers[0].image
-          value: arcadedata/arcadedb:26.10.2
+          value: arcadedata/arcadedb:26.11.1
 
   - it: native flavor defaults the tag to <appVersion>-native
     set:
@@ -20,7 +20,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: arcadedata/arcadedb:26.10.2-native
+          value: arcadedata/arcadedb:26.11.1-native
 
   - it: native flavor leaves an explicit image.tag untouched
     set:
