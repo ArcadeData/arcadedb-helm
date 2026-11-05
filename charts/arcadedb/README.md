@@ -247,6 +247,20 @@ of `bin/server.sh`. Compared with the JVM flavor:
 - When you set `image.tag` yourself, choose the `image.flavor` that matches it
   (e.g. `image.tag=latest-native` with `image.flavor=native`).
 
+**CPU requirements.** From 26.11.1 the native binary is compiled for a CPU baseline:
+`x86-64-v3` on amd64 (AVX, AVX2, BMI1/2, FMA, MOVBE, LZCNT, F16C) and `armv8-a` on arm64, so
+arm64 nodes are unaffected. On an amd64 node without those instructions the pod crashes at start.
+That means Intel CPUs older than Haswell (2013), low-end Celeron/Pentium/Atom parts, AMD
+Bulldozer to Steamroller, and virtual machines whose CPU model hides AVX2 (for example QEMU's
+default `qemu64`). No lower-baseline image is published, so use `image.flavor=jvm` on such
+nodes. To check a node: `grep -o -w -E 'avx2|bmi2|fma' /proc/cpuinfo | sort -u` should print all three.
+
+**Upgrading an existing volume.** Every 26.11.1 image runs as `1000:1000`. Native images before
+that wrote their volumes as root (amd64) or 65532 (arm64), so a volume kept across the upgrade is
+not writable by the new user. Run `chown -R 1000:1000` on it once. For the config directory,
+`initContainers.configDirectory` does this; for the data volume, use a one-off pod or Job that
+mounts the claim.
+
 ### initContainers
 
 | Name                                                  | Description                                                                                                  | Value             |
