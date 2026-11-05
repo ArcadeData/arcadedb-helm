@@ -195,8 +195,19 @@ root password makes it guessable and it cannot be rotated on its own. The chart 
 
 Upgrading an HA release from a chart version that did not mount a token changes the token. During the rolling restart
 the restarted pods hold the new token and the others the old one, so commands forwarded between the two groups can be
-rejected until the rollout completes. Rotating the token later (changing the Secret and restarting the StatefulSet)
-behaves the same way.
+rejected until the rollout completes. Rotating a dedicated token later (changing the Secret and restarting the
+StatefulSet) behaves the same way.
+
+Rotating the root password when the token is derived from it (HA, user root password Secret, no cluster token, image
+26.11.1 or later) is stricter: a node refuses to start when the password behind its derived token changed. Either set
+a dedicated token first (`arcadedb.credentials.clusterToken.secret`, see above), which lifts the restriction, or allow
+one rotation by passing `arcadedb.ha.clusterTokenAllowRotation=true` for a single rollout and removing it afterwards:
+
+```shell
+helm upgrade ... \
+  --set-string 'arcadedb.extraEnvironment[0].name=arcadedb.ha.clusterTokenAllowRotation' \
+  --set-string 'arcadedb.extraEnvironment[0].value=true'
+```
 
 ### image
 
